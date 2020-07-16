@@ -2,12 +2,14 @@ import os
 import glob
 import math
 import copy
+import numpy as np
 import pandas as pd
 import sys, os.path
 import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath('../'))
 from settings import config
+from helpers import boolean
 
 # a Spectrum object will only contain information regarding 1
 # spectrum along with the parameters associated with that spectrum
@@ -93,6 +95,8 @@ class Figures:
                     x_coord = math.floor(i / ncols)
                     y_coord = i % ncols
                     subplot_tracker.append(ax0[x_coord, y_coord])
+                    if boolean(config['Uncalibrated Figures']['masking']):
+                        spect.wvs = self._mask_wvs(spect.wvs)
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
                     ax0[x_coord, y_coord].errorbar(spect.wvs, spect.uncalib_spect, yerr=spect.uncalib_error, 
@@ -172,6 +176,8 @@ class Figures:
                     x_coord = math.floor(i / ncols)
                     y_coord = i % ncols
                     subplot_tracker.append(ax0[x_coord, y_coord])
+                    if boolean(config['Calibrated Figures']['masking']):
+                        spect.wvs = self._mask_wvs(spect.wvs)
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
                     ax0[x_coord, y_coord].errorbar(spect.wvs, spect.calib_spect, yerr=spect.calib_error, 
@@ -322,6 +328,27 @@ class Figures:
         
         return spectrum
 
+    # takes in a set of wavelengths and masks them such that the ones that they 
+    # only lie in bandpass ranges
+    def _mask_wvs(self, wvs):
+        j_mag_range = (1.176, 1.328)
+        h_mag_range = (1.490, 1.783)
+        k_mag_range = (2.019, 2.375)
+
+        mask = []
+        for wv in wvs:
+            b = self._in_band_range(wv, j_mag_range) or self._in_band_range(wv, h_mag_range) or self._in_band_range(wv, k_mag_range)
+            mask.append(not b)
+
+        return np.ma.masked_array(wvs, mask=mask)
+
+    # determine if a value is within the given range. The range argument is a 
+    # tuple of 2 values, (lower, upper)
+    def _in_band_range(self, val, rang):
+        if val >= rang[0] and val <= rang[1]:
+            return True
+        return False
+
 f = Figures()
 f.uncalib_fig()
-#f.calib_fig()
+f.calib_fig()
