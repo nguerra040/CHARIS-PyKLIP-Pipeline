@@ -17,7 +17,7 @@ from settings import config
 from helpers import boolean, get_bash_path
 
 cdbs_path = config['Paths']['cdbs_dir']
-bash_command = 'export PYSYN_CDBS=\"{}\"'.format(get_bash_path(cdbs_path))
+bash_command = 'export PYSYN_CDBS={}'.format(get_bash_path(cdbs_path))
 output = os.system(bash_command)
 print("output: ", output)
 import pysynphot as S
