@@ -72,6 +72,7 @@ class Figures:
                 ncols = int(config['Figure Parameters']['n_columns'])
                 fig0 = plt.figure(figsize=(20,20)) # figure of individal spectra with ref
                 ax0 = fig0.subplots(nrows=math.ceil(len(spect_group)/ncols) + 1, ncols=ncols)
+                subplot_tracker = [] # keeps track of the subplots that has been used
                 fig1,ax1 = plt.subplots()
                 for i,spect in enumerate(spect_group):
                     title_extension = ' ( '
@@ -91,6 +92,7 @@ class Figures:
                     # constructing actual subplot of small graphs
                     x_coord = math.floor(i / ncols)
                     y_coord = i % ncols
+                    subplot_tracker.append(ax0[x_coord, y_coord])
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
                     ax0[x_coord, y_coord].errorbar(spect.wvs, spect.uncalib_spect, yerr=spect.uncalib_error, 
@@ -123,7 +125,14 @@ class Figures:
                                                         color='C0')
                     ax0[x_coord,y_coord].legend()
                     ax1.legend(prop={'size': 6})
+                # loop through all the axes in ax0 and determine if it has been used.
+                # If not, delete the subplot
+                for a in ax0.flatten():
+                    if not(a in subplot_tracker):
+                        fig0.delaxes(a)
                 plt.tight_layout()
+
+                # export plots
                 fig0.savefig(os.path.join(figure_dir,
                             '{}_small_{}.png'.format(config['Uncalibrated Figures']['basename'],dynamic_title_extension)))
                 fig1.savefig(os.path.join(figure_dir, 
@@ -142,6 +151,7 @@ class Figures:
                 ncols = int(config['Figure Parameters']['n_columns'])
                 fig0 = plt.figure(figsize=(20,20)) # figure of individal spectra with ref
                 ax0 = fig0.subplots(nrows=math.ceil(len(spect_group)/ncols) + 1, ncols=ncols)
+                subplot_tracker = [] # keeps track of the subplots that has been used
                 fig1,ax1 = plt.subplots()
                 for i,spect in enumerate(spect_group):
                     title_extension = ' ( '
@@ -161,6 +171,7 @@ class Figures:
                     # constructing actual subplot of small graphs
                     x_coord = math.floor(i / ncols)
                     y_coord = i % ncols
+                    subplot_tracker.append(ax0[x_coord, y_coord])
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
                     ax0[x_coord, y_coord].errorbar(spect.wvs, spect.calib_spect, yerr=spect.calib_error, 
@@ -193,7 +204,15 @@ class Figures:
                                                         color='C0')
                     ax0[x_coord,y_coord].legend()
                     ax1.legend(prop={'size': 6})
+
+                # loop through all the axes in ax0 and determine if it has been used.
+                # If not, delete the subplot
+                for a in ax0.flatten():
+                    if not(a in subplot_tracker):
+                        fig0.delaxes(a)
                 plt.tight_layout()
+
+                # export plots
                 fig0.savefig(os.path.join(figure_dir,
                             '{}_small_{}.png'.format(config['Calibrated Figures']['basename'],dynamic_title_extension)))
                 fig1.savefig(os.path.join(figure_dir, 
@@ -305,4 +324,4 @@ class Figures:
 
 f = Figures()
 f.uncalib_fig()
-f.calib_fig()
+#f.calib_fig()
