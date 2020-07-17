@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import sys, os.path
 import matplotlib.pyplot as plt
+from uncertainties import ufloat
+from uncertainties import unumpy
 
 sys.path.append(os.path.abspath('../'))
 from settings import config
@@ -65,10 +67,12 @@ class Figures:
     # create figues for spectra that is not calibrated. The output figures are 
     # then stored in their respective case directory
     def uncalib_fig(self):
+
         # iterate through all the cases
         for casename, spectra in self.cases.items():
             figure_dir = self.case_to_figure_dir[casename]
             s = self._reshape(spectra, config['Figure Parameters']['regroup'])
+
             # then iterate thorugh each parameter group specified
             for spect_group in s:
                 ncols = int(config['Figure Parameters']['n_columns'])
@@ -129,12 +133,13 @@ class Figures:
                                                         color='C0')
                     ax0[x_coord,y_coord].legend()
                     ax1.legend(prop={'size': 6})
+
                 # loop through all the axes in ax0 and determine if it has been used.
                 # If not, delete the subplot
                 for a in ax0.flatten():
                     if not(a in subplot_tracker):
                         fig0.delaxes(a)
-                plt.tight_layout()
+                fig0.tight_layout()
 
                 # export plots
                 fig0.savefig(os.path.join(figure_dir,
@@ -146,10 +151,12 @@ class Figures:
     # create figures for spectra that is calibrated. The output figures are 
     # then stored in their respective case directory
     def calib_fig(self):
+
         # iterate through all the cases
         for casename, spectra in self.cases.items():
             figure_dir = self.case_to_figure_dir[casename]
             s = self._reshape(spectra, config['Figure Parameters']['regroup'])
+
             # then iterate thorugh each parameter group specified
             for spect_group in s:
                 ncols = int(config['Figure Parameters']['n_columns'])
@@ -216,7 +223,7 @@ class Figures:
                 for a in ax0.flatten():
                     if not(a in subplot_tracker):
                         fig0.delaxes(a)
-                plt.tight_layout()
+                fig0.tight_layout()
 
                 # export plots
                 fig0.savefig(os.path.join(figure_dir,
@@ -227,7 +234,87 @@ class Figures:
     # create figures for the difference in magnitude. The output figures are 
     # then stored in their respective case directory
     def mag_fig(self):
-        pass
+        bands = {'J': 1.252, 'H': 1.6365, 'K': 2.197}
+        # iterate through all the cases
+        for casename, spectra in self.cases.items():
+            figure_dir = self.case_to_figure_dir[casename]
+            s = self._reshape(spectra, config['Figure Parameters']['regroup'])
+            # then iterate thorugh each parameter group specified
+            for spect_group in s:
+                # create plot
+                fig, ax = plt.subplots()
+                # add lines to plot
+                for i,spect in enumerate(spect_group):
+                    # find the satellite to spot ratio
+                    spot_to_star_ratio = np.array([2.72*(10**-3)/(lamb/1.55)**2 for lamb in spect.wvs])
+
+                    # find a list of slice values that correspond to the bands J, H, and K
+                    corresponding_slices = []
+                    mag_wvs = []
+                    for key,val in bands.items():
+                        corres_val = min(spect.wvs, key=lambda x:abs(x-val))
+                        corresponding_slices.append(spect.wvs.tolist().index(corres_val))
+                        mag_wvs.append(corres_val)
+                    
+                    # convert uncalibrated spectra values and errors into ufloat type to correctly propogate 
+                    # error bars
+                    mag_ufloat = []
+                    for s in corresponding_slices:
+                        mag_ufloat.append(ufloat(spect.uncalib_spect[s], spect.uncalib_error[s]))
+                    
+                    # calculate dmag
+                    dmag_ufloat = -2.5 * unumpy.log10(mag_ufloat * spot_to_star_ratio[corresponding_slices])
+
+                    # separate values so it's easier to graph
+                    dmag_value = []
+                    dmag_err = []
+                    for dmag in dmag_ufloat:
+                        dmag_value.append(dmag.nominal_value)
+                        dmag_err.append(dmag.std_dev)
+
+                    # dynamically generate the title extension to make title more descriptive
+                    title_extension = ' ( '
+                    dynamic_title_extension = ' ( '
+                    for key,val in spect.params.items():
+                        title_extension = title_extension + '{}={} '.format(key, val)
+                        if key == config['Figure Parameters']['regroup']:
+                            dynamic_title_extension = dynamic_title_extension + '{}={}'.format(key,val)
+                    title_extension = title_extension + ')'
+                    dynamic_title_extension = dynamic_title_extension + ')'
+
+                    # set plot attributes
+                    ax.set_title(config['Magnitude Figures']['title_base'] + dynamic_title_extension)
+                    ax.set(xlabel=config['Magnitude Figures']['x_axis'], ylabel=config['Magnitude Figures']['y_axis'])
+
+                    # plot graph
+                    ax.errorbar(mag_wvs, dmag_value, yerr=dmag_err, 
+                                label=config['Figure Parameters']['legend_label'], 
+                                capsize=3, color=self.colors[0])
+
+                # plotting reference graph
+                ref_path = config['Magnitude Figures']['reference_path']
+                if ref_path != '':
+                    if not os.path.isfile(ref_path):
+                        raise Exception('Please enter a valid path to reference')
+                    ref_spect = self._get_ref_spectra(ref_path)
+                    if ref_spect.err_q:
+                        ax.errorbar(ref_spect.wvs, ref_spect.uncalib_spect, yerr=ref_spect.uncalib_error, 
+                                                        label=config['Magnitude Figures']['reference_label'], capsize=3, 
+                                                        color='C0')
+                    else:
+                        ax.plot(ref_spect.wvs, ref_spect.uncalib_spect,
+                                                    label=config['Magnitude Figures']['reference_label'],
+                                                    color='C0')
+
+                # adding the legend
+                handles, labels = ax.get_legend_handles_labels()
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys())
+                fig.savefig(os.path.join(figure_dir,
+                            '{} {}.png'.format(config['Magnitude Figures']['basename'], dynamic_title_extension)))
+                
+
+
 
     # create figure that combines the calibrated spectra across different
     # cases
@@ -350,5 +437,6 @@ class Figures:
         return False
 
 f = Figures()
-f.uncalib_fig()
-f.calib_fig()
+#f.uncalib_fig()
+#f.calib_fig()
+f.mag_fig()

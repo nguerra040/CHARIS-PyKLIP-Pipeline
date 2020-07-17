@@ -5,6 +5,8 @@ def boolean(string):
         return True
     elif string == 'False' or string == 'false':
         return False
+    elif string == 'None' or string == 'none':
+        return None
     else:
         raise Exception('expect true or false string.')
 
