@@ -1,10 +1,10 @@
 import os
 import itertools
 import configparser
-from klip import KLIP
-from settings import config
-from charisdrp import ExtractCubes
-from helpers import boolean
+from pipeline.klip import KLIP
+from pipeline.settings import config
+from pipeline.charisdrp import ExtractCubes
+from pipeline.helpers import boolean
 
 def main():
     root_dir = config['Paths']['root_dir']

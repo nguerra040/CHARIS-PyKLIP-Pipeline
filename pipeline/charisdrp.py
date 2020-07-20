@@ -2,8 +2,9 @@ import os
 import glob
 import subprocess
 import configparser
-from settings import config
-from helpers import get_bash_path
+
+from .settings import config
+from .helpers import get_bash_path
 
 class ExtractCubes:
     def __init__(self, case_dir):

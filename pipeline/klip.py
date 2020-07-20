@@ -13,8 +13,8 @@ import pyklip.fmlib.extractSpec as es
 import pyklip.parallelized as parallelized
 from pyklip.instruments import CHARIS as charis
 
-from settings import config
-from helpers import boolean, get_bash_path
+from .settings import config, get_star_spot_ratio
+from .helpers import boolean, get_bash_path
 
 cdbs_path = config['Paths']['cdbs_dir']
 bash_command = 'export PYSYN_CDBS={}'.format(get_bash_path(cdbs_path))
@@ -165,20 +165,29 @@ class KLIP:
                     d_star_val, d_star_err = list(map(float, config['Icat']['D_star'].split(',')))
                     D_star = ufloat(d_star_val, d_star_err)
 
-                    #satellite spot to star ratio
-                    spot_to_star_ratio = np.array([2.72*(10**-3)/(lamb/1.55)**2 for lamb in self.dataset.wvs[0:nl]])
+                    # determine satellite spot to star ratio
+                    mod_list = [header['X_GRDAMP'] for header in self.dataset.prihdrs]
+                    mjd_list = [header['MJD'] for header in self.dataset.prihdrs]
+                    if len(mod_list) == 0 or mod_list.count(mod_list[0]) == len(mod_list): # check if all the modulations are the same 
+                        raise Exception('There is no modulation amplitude or there are multiple')
+                    if max(mjd_list) - min(mjd_list) > 1:
+                        raise Exception('Cubes are not from the same observation night')
+                    mod = mod_list[0]
+                    wvs = self.dataset.wvs[0:nl]
+                    mjd = mjd_list[0]
+                    spot_to_star_ratio = get_star_spot_ratio(mod, wvs, mjd)
 
-                    #star spectrum
+                    # star spectrum
                     sp = S.Icat(config['Icat']['model_name'], float(config['Icat']['eff_temp']), 
                                 float(config['Icat']['metal']), float(config['Icat']['logg']))
                     sp.convert(config['Icat']['x-axis'])
                     sp.convert(config['Icat']['y-axis'])
                     star_spectrum = np.array([sp.sample(self.dataset.wvs[i]) for i in range(nl)]) * (R_star / D_star)**2
 
-                    #perform actual calibration
+                    # perform actual calibration
                     self.exspect_ufloat_calibrated = self.exspect_ufloat * star_spectrum * spot_to_star_ratio
 
-                    #export data
+                    # export data
                     self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated')
                 else:
                     # from https://scholar.princeton.edu/charis/capabilities
@@ -200,7 +209,16 @@ class KLIP:
                             star_mag = np.append(star_mag, ufloat(val, err))
 
                     #satellite spot to star ratio
-                    spot_to_star_ratio = np.array([2.72*(10**-3)/(lamb/1.55)**2 for lamb in self.dataset.wvs[0:nl]])
+                    mod_list = [header['X_GRDAMP'] for header in self.dataset.prihdrs]
+                    mjd_list = [header['MJD'] for header in self.dataset.prihdrs]
+                    if len(mod_list) == 0 or mod_list.count(mod_list[0]) == len(mod_list): # check if all the modulations are the same 
+                        raise Exception('There is no modulation amplitude or there are multiple')
+                    if max(mjd_list) - min(mjd_list) > 1:
+                        raise Exception('Cubes are not from the same observation night')
+                    mod = mod_list[0]
+                    wvs = self.dataset.wvs[0:nl]
+                    mjd = mjd_list[0]
+                    spot_to_star_ratio = get_star_spot_ratio(mod, wvs, mjd)
 
                     #star spectrum
                     sp = S.FileSpectrum(config['Non-Icat']['filename'])

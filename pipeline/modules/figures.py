@@ -10,8 +10,8 @@ from uncertainties import ufloat
 from uncertainties import unumpy
 
 sys.path.append(os.path.abspath('../'))
-from settings import config
-from helpers import boolean
+from pipeline.settings import config
+from pipeline.helpers import boolean
 
 # a Spectrum object will only contain information regarding 1
 # spectrum along with the parameters associated with that spectrum
@@ -99,11 +99,12 @@ class Figures:
                     x_coord = math.floor(i / ncols)
                     y_coord = i % ncols
                     subplot_tracker.append(ax0[x_coord, y_coord])
+                    masked_wvs = spect.wvs
                     if boolean(config['Uncalibrated Figures']['masking']):
-                        spect.wvs = self._mask_wvs(spect.wvs)
+                        masked_wvs = self._mask_wvs(masked_wvs)
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
-                    ax0[x_coord, y_coord].errorbar(spect.wvs, spect.uncalib_spect, yerr=spect.uncalib_error, 
+                    ax0[x_coord, y_coord].errorbar(masked_wvs, spect.uncalib_spect, yerr=spect.uncalib_error, 
                                                     label=config['Figure Parameters']['legend_label'], capsize=3, 
                                                     color=self.colors[0])
                     
@@ -115,7 +116,7 @@ class Figures:
                     # a composition of all the graphs
                     ax1.set_title(title)
                     ax1.set(xlabel=x_axis, ylabel=y_axis)
-                    ax1.plot(spect.wvs, spect.uncalib_spect, label=title_extension)
+                    ax1.plot(masked_wvs, spect.uncalib_spect, label=title_extension)
 
                     # adding reference to subplot
                     ref_path = config['Uncalibrated Figures']['reference_path']
@@ -183,11 +184,12 @@ class Figures:
                     x_coord = math.floor(i / ncols)
                     y_coord = i % ncols
                     subplot_tracker.append(ax0[x_coord, y_coord])
+                    masked_wvs = spect.wvs
                     if boolean(config['Calibrated Figures']['masking']):
-                        spect.wvs = self._mask_wvs(spect.wvs)
+                        masked_wvs = self._mask_wvs(masked_wvs)
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
-                    ax0[x_coord, y_coord].errorbar(spect.wvs, spect.calib_spect, yerr=spect.calib_error, 
+                    ax0[x_coord, y_coord].errorbar(masked_wvs, spect.calib_spect, yerr=spect.calib_error, 
                                                     label=config['Figure Parameters']['legend_label'], capsize=3, 
                                                     color=self.colors[0])
                     
@@ -199,7 +201,7 @@ class Figures:
                     # a composition of all the graphs
                     ax1.set_title(title)
                     ax1.set(xlabel=x_axis, ylabel=y_axis)
-                    ax1.plot(spect.wvs, spect.calib_spect, label=title_extension)
+                    ax1.plot(masked_wvs, spect.calib_spect, label=title_extension)
 
                     # adding reference to subplot
                     ref_path = config['Calibrated Figures']['reference_path']
@@ -437,6 +439,6 @@ class Figures:
         return False
 
 f = Figures()
-#f.uncalib_fig()
-#f.calib_fig()
+f.uncalib_fig()
+f.calib_fig()
 f.mag_fig()
