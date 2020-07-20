@@ -408,7 +408,7 @@ class Figures:
         wvs = arr_df[0]
         val = arr_df[1]
         try:
-            err = arr_df[3]
+            err = arr_df[2]
             spectrum = Spectrum(wvs=wvs, uncalib_spect=val, uncalib_error=err)
             spectrum.err_q = True
         except:

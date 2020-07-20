@@ -3,13 +3,18 @@ import numpy as np
 from uncertainties import ufloat
 from uncertainties import unumpy
 
-# adapted from Currie's IDL code
+# adapted from Currie's IDL code. Given the modulation
+# amplitude size, wavelengths, date, and optional manual 
+# attenuation factor, returns the spot to star ratio at
+# each wavelength.
 def get_star_spot_ratio(mod, wvs, mjd, manual=None):
     central_wv = 1.550
     mod = int(mod)
     wvs = np.array(wvs)
 
+    # no manual attenuation factor
     if manual == None:
+        # check if date is before 7-30-2017
         if mjd < 57995:
             if mod == 50:
                 atten_factor = 10**(-0.4 * 5.991)
@@ -26,7 +31,7 @@ def get_star_spot_ratio(mod, wvs, mjd, manual=None):
                 conv_factor = (central_wv / wvs)**2
                 atten_factor = atten_factor * conv_factor
                 error = 0.06 / 1.0857 * atten_factor
-        else:
+        else: # date is or after 8-31-2017
             if mod == 50:
                 atten_factor = 10**(-0.4 * 4.92)
                 conv_factor = (central_wv / wvs)**2
@@ -42,7 +47,7 @@ def get_star_spot_ratio(mod, wvs, mjd, manual=None):
                 conv_factor = (central_wv / wvs)**2
                 atten_factor = atten_factor * conv_factor
                 error = 0.05 / 1.0857 * atten_factor
-    else:
+    else: # manual attenuation factor used
         atten_factor = manual
         conv_factor = (central_wv / wvs) ** 2
         atten_factor = atten_factor * conv_factor
@@ -51,7 +56,9 @@ def get_star_spot_ratio(mod, wvs, mjd, manual=None):
     return unumpy.uarray(atten_factor, error)
 
 
-
+# Takes a boolean string and converts it into 
+# an actual python boolean value. Used to convert
+# boolean strings in the config file.
 def boolean(string):
     if string == 'True' or string == 'true':
         return True
@@ -62,6 +69,8 @@ def boolean(string):
     else:
         raise Exception('expect true or false string.')
 
+# Make python path bash-friendly by replacing all 
+# spaces ' ' with '\ '.
 def get_bash_path(p):
     path = p.replace(' ', '\\ ')
     return path

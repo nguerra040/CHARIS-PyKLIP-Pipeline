@@ -6,7 +6,11 @@ import configparser
 from .settings import config
 from .helpers import get_bash_path
 
+# An ExtractCubes object is tasked with reducing a single case of
+# raw CHARIS data from SMOKA into datacubes pyKLIP can use. Each 
+# of its methods represent a step in the extraction process.
 class ExtractCubes:
+    # initialize directory variables and create new directories if needed
     def __init__(self, case_dir):
         self.case_dir = case_dir
         self.raw_data_dir = os.path.join(case_dir,'raw/data')
@@ -26,6 +30,9 @@ class ExtractCubes:
         if not os.path.exists(self.ramps_dir):
             os.makedirs(self.ramps_dir)
     
+    # First step in extracting a datacube, generates a wavelength
+    # calibration from a calibration file located in the case/raw/calib
+    # directory.
     def generate_wavecal(self, overwrite=False):
         calib_file = glob.glob(os.path.join(self.calib_dir, '*.fits'))
         if overwrite or len(calib_file) == 1:
@@ -37,6 +44,8 @@ class ExtractCubes:
             output = os.system(bash_command)
             print("output: ", output)
 
+    # Second step in extracting a datacube, generates a .ini file that 
+    # the CHARISDRP needs to perform step 3.
     def generate_extract_config(self, overwrite=False):
         if overwrite or not os.path.exists(os.path.join(self.case_dir, "modified.ini")):
             caldir = os.path.relpath(self.calib_dir, self.cubes_dir)
@@ -46,7 +55,8 @@ class ExtractCubes:
             with open(os.path.join(self.case_dir,'modified.ini'), 'w') as config_file:
                 modified.write(config_file)
 
-
+    # Third step in extracting a datacube. Extract the cubes using bash
+    # commands for CHARISDRP.
     def generate_reduced_cubes(self, overwrite=False):
         files = glob.glob(os.path.join(self.cubes_dir, '*.fits')) + glob.glob(os.path.join(self.ramps_dir, '*.fits'))
         if overwrite or len(files) == 0:
@@ -60,6 +70,9 @@ class ExtractCubes:
         for ramp in displaced_ramps:
             os.rename(ramp, os.path.join(self.ramps_dir, os.path.basename(ramp)))
 
+    # Helper function for self.generate_extract_config(). Given a list
+    # of sections, creates a new config file with only the sections in 
+    # that list.
     def _create_config_sections(self, sections):
         new_config = configparser.ConfigParser()
         for section in sections:

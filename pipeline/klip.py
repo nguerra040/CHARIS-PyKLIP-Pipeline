@@ -13,16 +13,25 @@ import pyklip.fmlib.extractSpec as es
 import pyklip.parallelized as parallelized
 from pyklip.instruments import CHARIS as charis
 
-from .settings import config, get_star_spot_ratio
-from .helpers import boolean, get_bash_path
+from .settings import config
+from .helpers import boolean, get_bash_path, get_star_spot_ratio
 
+# Set the value of the system environment variable $PYSTN_CDBS
+# to be the location of the pysynphot cdbs directory.
 cdbs_path = config['Paths']['cdbs_dir']
 bash_command = 'export PYSYN_CDBS={}'.format(get_bash_path(cdbs_path))
 output = os.system(bash_command)
 print("output: ", output)
 import pysynphot as S
 
+# A KLIP object is tasked with completing stage 2 of the 
+# pipeline, where the extracted cubes from stage 1 are fed 
+# into pyKLIP to extract the spectrum of the planet using 
+# KLIP-FM. Each KLIP object only operates on a single case 
+# and therefore could easily be parallelized in the future 
+# for multiple cases.
 class KLIP:
+    # Initialize directory variables and create new dirrectories if needed
     def __init__(self, case_dir, params):
         postfix = ''
         for param in params:
@@ -53,7 +62,12 @@ class KLIP:
         if not os.path.exists(self.klipped_general_dir):
             os.makedirs(self.klipped_general_dir)
 
+
+
+    # A helper function for self.klip_general and self.klip_fm_spect
+    # that reads in a dataset and creates a PSF cube for that dataset.
     def _intgest_data(self):
+        # obtain all image files
         image_files = glob.glob(os.path.join(self.cubes_dir,"*.fits"))
         image_files.sort()
         self.data = image_files
@@ -61,15 +75,19 @@ class KLIP:
             self.skipslices = []
         else:
             self.skipslices = list(map(int, config['Readin']['skipslices'].split(",")))
+        # read in image files as a charis object
         self.dataset = charis.CHARISData(self.data,
                                         skipslices=self.skipslices, 
                                         update_hdrs=boolean(config['Readin']['updatehdrs']))
+        # generate a PSF cube for that dataset from satellite spots
         self.dataset.generate_psfs(int(self.parameters['boxrad']))
         self.PSF_cube = self.dataset.psfs
 
 
 
-
+    # Perform KLIP via pyKLIP on the dataset, used to produce 
+    # a processed image so user can keep determine the planet's
+    # parallactic angle and separation.
     def klip_general(self, overwrite=False):
         dir_contents = os.listdir(self.klipped_general_dir)
         if overwrite or len(dir_contents) == 0:
@@ -86,9 +104,11 @@ class KLIP:
                                         mode=self.parameters['mode'], 
                                         highpass=boolean(self.parameters['highpass']))
 
-
-
-
+    # Perform KLIP-FM via pyKLIP on the dataset, used to produce
+    # the spectrum. The method first extracts an intial spectra. 
+    # then using the initial spectra, inject fake planets to obtain
+    # the error bars. Following that, perform algorithmic calibration
+    # and spectral calibration. Finally, export the spectra as a csv file.
     def klip_fm_spect(self, overwrite=False):
         klipped_fm_spectra_dir_contents = os.listdir(self.klipped_fm_spectra_dir)
         spect_dir_contents = os.listdir(self.spectra_dir)
@@ -103,6 +123,7 @@ class KLIP:
             numbasis = list(map(int, self.parameters['numbasis'].split(',')))
             stamp_size = int(self.parameters['stampsize'])
 
+            # forward modeling class
             self.fm_class = es.ExtractSpec(self.dataset.input.shape,
                                         numbasis=numbasis,
                                         sep=planet_sep,
@@ -115,6 +136,8 @@ class KLIP:
                 spectrum = None
             else:
                 spectrum = self.parameters['spectrum']
+            
+            # perform KLIP using pyKLIP
             fm.klip_dataset(self.dataset, self.fm_class,
                             fileprefix=self.parameters['fileprefix'],
                             annuli=[[planet_sep-stamp_size,planet_sep+stamp_size]],
@@ -127,11 +150,14 @@ class KLIP:
                             highpass=boolean(self.parameters['highpass']),
                             outputdir=self.klipped_fm_spectra_dir)
 
+            # invert the FM to get the spectra
             self.exspect, self.fm_matrix = es.invert_spect_fmodel(self.dataset.fmout, 
                                                                 self.dataset, 
                                                                 units=self.parameters['units'],
                                                                 scaling_factor=self.parameters['scalefactor'],
                                                                 method=self.parameters['reverse_method'])
+            
+            # calculate the fake planet spectra
             fake_spectra_all_bases = self._calc_error_bars()
             self.exspect_error = []
             self.fake_mean = []
@@ -142,7 +168,11 @@ class KLIP:
                     m = ufloat(np.mean(x), np.std(x))
                     self.exspect_error.append(err)
                     self.fake_mean.append(m)
+
+            # error bars
             self.exspect_error = np.array(self.exspect_error).reshape(int(len(self.exspect_error)/nl),nl)
+
+            # algorithmic bias correction factor
             self.fake_mean = np.array(self.fake_mean).reshape(int(len(self.fake_mean)/nl),nl)
 
             #convert to ufloat
@@ -155,8 +185,10 @@ class KLIP:
             if boolean(config['Calibration']['algo_calibrate']):
                 self.exspect_ufloat = np.add(self.exspect_ufloat,(np.subtract(self.exspect_ufloat,self.fake_mean)))
 
+            # export spectra as csv
             self._export_csv_dataset(self.exspect_ufloat, 'uncalib')
 
+            # perform spectral calibration 
             if boolean(config['Calibration']['spect_calibrate']):
                 if boolean(config['Calibration']['icat']):
 
@@ -165,17 +197,8 @@ class KLIP:
                     d_star_val, d_star_err = list(map(float, config['Icat']['D_star'].split(',')))
                     D_star = ufloat(d_star_val, d_star_err)
 
-                    # determine satellite spot to star ratio
-                    mod_list = [header['X_GRDAMP'] for header in self.dataset.prihdrs]
-                    mjd_list = [header['MJD'] for header in self.dataset.prihdrs]
-                    if len(mod_list) == 0 or mod_list.count(mod_list[0]) == len(mod_list): # check if all the modulations are the same 
-                        raise Exception('There is no modulation amplitude or there are multiple')
-                    if max(mjd_list) - min(mjd_list) > 1:
-                        raise Exception('Cubes are not from the same observation night')
-                    mod = mod_list[0]
-                    wvs = self.dataset.wvs[0:nl]
-                    mjd = mjd_list[0]
-                    spot_to_star_ratio = get_star_spot_ratio(mod, wvs, mjd)
+                    # satellite spot to star ratio
+                    spot_to_star_ratio = self._get_satellite_spots()
 
                     # star spectrum
                     sp = S.Icat(config['Icat']['model_name'], float(config['Icat']['eff_temp']), 
@@ -208,17 +231,8 @@ class KLIP:
                             val, err = list(map(float, config['Non-Icat']['K_band'].split(',')))
                             star_mag = np.append(star_mag, ufloat(val, err))
 
-                    #satellite spot to star ratio
-                    mod_list = [header['X_GRDAMP'] for header in self.dataset.prihdrs]
-                    mjd_list = [header['MJD'] for header in self.dataset.prihdrs]
-                    if len(mod_list) == 0 or mod_list.count(mod_list[0]) == len(mod_list): # check if all the modulations are the same 
-                        raise Exception('There is no modulation amplitude or there are multiple')
-                    if max(mjd_list) - min(mjd_list) > 1:
-                        raise Exception('Cubes are not from the same observation night')
-                    mod = mod_list[0]
-                    wvs = self.dataset.wvs[0:nl]
-                    mjd = mjd_list[0]
-                    spot_to_star_ratio = get_star_spot_ratio(mod, wvs, mjd)
+                    # satellite spot to star ratio
+                    spot_to_star_ratio = self._get_satellite_spots()
 
                     #star spectrum
                     sp = S.FileSpectrum(config['Non-Icat']['filename'])
@@ -230,13 +244,14 @@ class KLIP:
                     #perform actual calibration
                     self.exspect_ufloat_calibrated = self.exspect_ufloat * star_spectrum * spot_to_star_ratio
 
-                    #export data
+                    #export spectra data as csv file
                     self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated')
 
 
-
-
-
+    # Helper function for self.klip_fm_spect. Function injects fake planets 
+    # into the dataset and then forward models their spectra. These spectra 
+    # is returned and is used to determine the error bars as well as to correct
+    # for algorithmic bias.
     def _calc_error_bars(self):
         N_frames = len(self.dataset.input)
         N_cubes = np.size(np.unique(self.dataset.filenums))
@@ -292,12 +307,19 @@ class KLIP:
 
 
         nplanets = int(config['Errorbars']['nplanets'])
-        pas = (np.linspace(planet_pa, planet_pa+360, num=nplanets+2)%360)[1:-1]
+
+        # same separation as the real planet, equal radial spacing between 
+        # the n fake planets
+        pas = (np.linspace(planet_pa, planet_pa+360, num=nplanets+2)%360)[1:-1] 
         fake_spectra_all_bases = []
-        for i in range(len(numbasis)):
+
+        # iterate through all the requested modes
+        for i in range(len(numbasis)): 
             input_spect = self.exspect[i,:]
             fake_spectra = np.zeros((nplanets, nl))
-            for p, pa in enumerate(pas):
+
+            # iterate through all the requested planets
+            for p, pa in enumerate(pas): 
                 basis_dir = os.path.join(self.fakes_dir, str(numbasis[i]))
                 if not os.path.exists(basis_dir):
                     os.makedirs(basis_dir)
@@ -308,6 +330,42 @@ class KLIP:
 
         return fake_spectra_all_bases
 
+    # Helper function for self.klip_fm_spectm, used to 
+    # calculate the satellite spot to star ratio with 
+    # the function get_star_spot_ratio in helpers.py.
+    def _get_satellite_spots(self):
+        N_frames = len(self.dataset.input)
+        N_cubes = np.size(np.unique(self.dataset.filenums))
+        nl = N_frames // N_cubes
+
+        # determine satellite spot to star ratio
+        mod_list = [header['X_GRDAMP'] for header in self.dataset.prihdrs]
+        mjd_list = [header['MJD'] for header in self.dataset.prihdrs]
+
+        # check if all the modulations are the same 
+        if len(mod_list) == 0 or mod_list.count(mod_list[0]) == len(mod_list): 
+            raise Exception('There is no modulation amplitude or there are multiple')
+        if max(mjd_list) - min(mjd_list) > 1:
+            raise Exception('Cubes are not from the same observation night')
+        mod = mod_list[0] * 100 # to convert from um to nm
+        wvs = self.dataset.wvs[0:nl]
+        mjd = mjd_list[0]
+
+        # determine if user wants to input a manual attenuation factor
+        if boolean(config['Calibration']['manual_attenutation_factor']) == None: 
+            manual = None
+        else:
+            try:
+                manual = float(config['Calibration']['manual_attenutation_factor'])
+            except:
+                raise Exception('manual_attenuation_factor must be a float type object')
+        spot_to_star_ratio = get_star_spot_ratio(mod, wvs, mjd, manual=manual)
+        
+        return spot_to_star_ratio
+
+    # Helper function for self.klip_fm_spect, 
+    # takes in a spectra and a file prefix and 
+    # exports the spectra as a csv file.
     def _export_csv_dataset(self, spect, prefix):
         N_frames = len(self.dataset.input)
         N_cubes = np.size(np.unique(self.dataset.filenums))
