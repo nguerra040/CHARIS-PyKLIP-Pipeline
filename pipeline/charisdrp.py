@@ -50,7 +50,7 @@ class ExtractCubes:
         if overwrite or not os.path.exists(os.path.join(self.case_dir, "modified.ini")):
             caldir = os.path.relpath(self.calib_dir, self.cubes_dir)
             config['Calib']['calibdir'] = caldir
-            sections = ['Ramp', 'Calib', 'Extract']
+            sections = ['Ramp', 'Calib', 'Extract'] # sections that need to be copied over to new .ini file
             modified = self._create_config_sections(sections)
             with open(os.path.join(self.case_dir,'modified.ini'), 'w') as config_file:
                 modified.write(config_file)

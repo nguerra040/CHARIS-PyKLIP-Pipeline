@@ -74,3 +74,12 @@ def boolean(string):
 def get_bash_path(p):
     path = p.replace(' ', '\\ ')
     return path
+
+# return the path with the specified number of directory
+# levels removed.
+def remove_n_path_levels(path, levels):
+        p = path
+        for i in range(levels):
+            p = os.path.dirname(p)
+        
+        return p

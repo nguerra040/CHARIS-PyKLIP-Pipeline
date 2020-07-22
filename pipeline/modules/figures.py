@@ -2,6 +2,7 @@ import os
 import glob
 import math
 import copy
+import itertools
 import numpy as np
 import pandas as pd
 import sys, os.path
@@ -11,7 +12,7 @@ from uncertainties import unumpy
 
 sys.path.append(os.path.abspath('../'))
 from pipeline.settings import config
-from pipeline.helpers import boolean
+from pipeline.helpers import boolean, remove_n_path_levels
 
 # a Spectrum object will only contain information regarding 1
 # spectrum along with the parameters associated with that spectrum
@@ -33,6 +34,7 @@ class Figures:
     def __init__(self):
         # obtain list of case dir paths
         self.root_dir = config['Paths']['root_dir']
+        self.root_figures_dir = os.path.join(self.root_dir, 'results/figures')
         self.case_dirs = config['Paths']['case_dir'].split(',')
         self.figures_dirs = []
         self.case_to_figure_dir = {}
@@ -44,10 +46,14 @@ class Figures:
                 self.case_to_figure_dir.update({os.path.basename(case):self.figures_dirs[i]})
 
             
-        # check if figure directory exists, if not, create it
+        # check if figure directory exists. If not, create it.
         for figures_dir in self.figures_dirs:
             if not os.path.exists(figures_dir):
                 os.makedirs(figures_dir)
+
+        # check if the root figures directory exists. If not, create it.
+        if not os.path.exists(self.root_figures_dir):
+            os.makedirs(self.root_figures_dir)
 
         # for each case, get all spectra associated with that case and put it
         # into a dictionary of case - list of Spectrum objects pair
@@ -67,171 +73,16 @@ class Figures:
     # create figues for spectra that is not calibrated. The output figures are 
     # then stored in their respective case directory
     def uncalib_fig(self):
+        # argument is section name of uncalibrated figures in config
+        self._plot_small_large_spect('Uncalibrated Figures')
 
-        # iterate through all the cases
-        for casename, spectra in self.cases.items():
-            figure_dir = self.case_to_figure_dir[casename]
-            s = self._reshape(spectra, config['Figure Parameters']['regroup'])
-
-            # then iterate thorugh each parameter group specified
-            for spect_group in s:
-                ncols = int(config['Figure Parameters']['n_columns'])
-                fig0 = plt.figure(figsize=(20,20)) # figure of individal spectra with ref
-                ax0 = fig0.subplots(nrows=math.ceil(len(spect_group)/ncols) + 1, ncols=ncols)
-                subplot_tracker = [] # keeps track of the subplots that has been used
-                fig1,ax1 = plt.subplots()
-                for i,spect in enumerate(spect_group):
-                    title_extension = ' ( '
-                    dynamic_title_extension = ' ( '
-                    for key,val in spect.params.items():
-                        title_extension = title_extension + '{}={} '.format(key, val)
-                        if key == config['Figure Parameters']['regroup']:
-                            dynamic_title_extension = dynamic_title_extension + '{}={}'.format(key,val)
-                    title_extension = title_extension + ')'
-                    dynamic_title_extension = dynamic_title_extension + ')'
-
-                    # small graph labels
-                    title = config['Uncalibrated Figures']['small_title_base'] + title_extension
-                    x_axis = config['Uncalibrated Figures']['small_x_axis']
-                    y_axis = config['Uncalibrated Figures']['small_x_axis']
-
-                    # constructing actual subplot of small graphs
-                    x_coord = math.floor(i / ncols)
-                    y_coord = i % ncols
-                    subplot_tracker.append(ax0[x_coord, y_coord])
-                    masked_wvs = spect.wvs
-                    if boolean(config['Uncalibrated Figures']['masking']):
-                        masked_wvs = self._mask_wvs(masked_wvs)
-                    ax0[x_coord, y_coord].set_title(title)
-                    ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
-                    ax0[x_coord, y_coord].errorbar(masked_wvs, spect.uncalib_spect, yerr=spect.uncalib_error, 
-                                                    label=config['Figure Parameters']['legend_label'], capsize=3, 
-                                                    color=self.colors[0])
-                    
-                    # large graph labels
-                    title = config['Uncalibrated Figures']['large_title_base'] + dynamic_title_extension
-                    x_axis = config['Uncalibrated Figures']['large_x_axis']
-                    y_axis = config['Uncalibrated Figures']['large_x_axis']
-
-                    # a composition of all the graphs
-                    ax1.set_title(title)
-                    ax1.set(xlabel=x_axis, ylabel=y_axis)
-                    ax1.plot(masked_wvs, spect.uncalib_spect, label=title_extension)
-
-                    # adding reference to subplot
-                    ref_path = config['Uncalibrated Figures']['reference_path']
-                    if ref_path != '':
-                        if not os.path.isfile(ref_path):
-                            raise Exception('Please enter a valid path to reference')
-                        ref_spect = self._get_ref_spectra(ref_path)
-                        if ref_spect.err_q:
-                            ax0[x_coord, y_coord].errorbar(ref_spect.wvs, ref_spect.uncalib_spect, yerr=ref_spect.uncalib_error, 
-                                                            label=config['Uncalibrated Figures']['reference_label'], capsize=3, 
-                                                            color='C0')
-                        else:
-                            ax0[x_coord, y_coord].plot(ref_spect.wvs, ref_spect.uncalib_spect,
-                                                        label=config['Uncalibrated Figures']['reference_label'],
-                                                        color='C0')
-                    ax0[x_coord,y_coord].legend()
-                    ax1.legend(prop={'size': 6})
-
-                # loop through all the axes in ax0 and determine if it has been used.
-                # If not, delete the subplot
-                for a in ax0.flatten():
-                    if not(a in subplot_tracker):
-                        fig0.delaxes(a)
-                fig0.tight_layout()
-
-                # export plots
-                fig0.savefig(os.path.join(figure_dir,
-                            '{}_small_{}.png'.format(config['Uncalibrated Figures']['basename'],dynamic_title_extension)))
-                fig1.savefig(os.path.join(figure_dir, 
-                            '{}_large_{}.png'.format(config['Uncalibrated Figures']['basename'],dynamic_title_extension)))
-            
 
     # create figures for spectra that is calibrated. The output figures are 
     # then stored in their respective case directory
     def calib_fig(self):
+        # argument is section name of uncalibrated figures in config
+        self._plot_small_large_spect('Calibrated Figures')
 
-        # iterate through all the cases
-        for casename, spectra in self.cases.items():
-            figure_dir = self.case_to_figure_dir[casename]
-            s = self._reshape(spectra, config['Figure Parameters']['regroup'])
-
-            # then iterate thorugh each parameter group specified
-            for spect_group in s:
-                ncols = int(config['Figure Parameters']['n_columns'])
-                fig0 = plt.figure(figsize=(20,20)) # figure of individal spectra with ref
-                ax0 = fig0.subplots(nrows=math.ceil(len(spect_group)/ncols) + 1, ncols=ncols)
-                subplot_tracker = [] # keeps track of the subplots that has been used
-                fig1,ax1 = plt.subplots()
-                for i,spect in enumerate(spect_group):
-                    title_extension = ' ( '
-                    dynamic_title_extension = ' ( '
-                    for key,val in spect.params.items():
-                        title_extension = title_extension + '{}={} '.format(key, val)
-                        if key == config['Figure Parameters']['regroup']:
-                            dynamic_title_extension = dynamic_title_extension + '{}={}'.format(key,val)
-                    title_extension = title_extension + ')'
-                    dynamic_title_extension = dynamic_title_extension + ')'
-
-                    # small graph labels
-                    title = config['Calibrated Figures']['small_title_base'] + title_extension
-                    x_axis = config['Calibrated Figures']['small_x_axis']
-                    y_axis = config['Calibrated Figures']['small_x_axis']
-
-                    # constructing actual subplot of small graphs
-                    x_coord = math.floor(i / ncols)
-                    y_coord = i % ncols
-                    subplot_tracker.append(ax0[x_coord, y_coord])
-                    masked_wvs = spect.wvs
-                    if boolean(config['Calibrated Figures']['masking']):
-                        masked_wvs = self._mask_wvs(masked_wvs)
-                    ax0[x_coord, y_coord].set_title(title)
-                    ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
-                    ax0[x_coord, y_coord].errorbar(masked_wvs, spect.calib_spect, yerr=spect.calib_error, 
-                                                    label=config['Figure Parameters']['legend_label'], capsize=3, 
-                                                    color=self.colors[0])
-                    
-                    # large graph labels
-                    title = config['Calibrated Figures']['large_title_base'] + dynamic_title_extension
-                    x_axis = config['Calibrated Figures']['large_x_axis']
-                    y_axis = config['Calibrated Figures']['large_x_axis']
-
-                    # a composition of all the graphs
-                    ax1.set_title(title)
-                    ax1.set(xlabel=x_axis, ylabel=y_axis)
-                    ax1.plot(masked_wvs, spect.calib_spect, label=title_extension)
-
-                    # adding reference to subplot
-                    ref_path = config['Calibrated Figures']['reference_path']
-                    if ref_path != '':
-                        if not os.path.isfile(ref_path):
-                            raise Exception('Please enter a valid path to reference')
-                        ref_spect = self._get_ref_spectra(ref_path)
-                        if ref_spect.err_q:
-                            ax0[x_coord, y_coord].errorbar(ref_spect.wvs, ref_spect.uncalib_spect, yerr=ref_spect.uncalib_error, 
-                                                            label=config['Calibrated Figures']['reference_label'], capsize=3, 
-                                                            color='C0')
-                        else:
-                            ax0[x_coord, y_coord].plot(ref_spect.wvs, ref_spect.uncalib_spect,
-                                                        label=config['Calibrated Figures']['reference_label'],
-                                                        color='C0')
-                    ax0[x_coord,y_coord].legend()
-                    ax1.legend(prop={'size': 6})
-
-                # loop through all the axes in ax0 and determine if it has been used.
-                # If not, delete the subplot
-                for a in ax0.flatten():
-                    if not(a in subplot_tracker):
-                        fig0.delaxes(a)
-                fig0.tight_layout()
-
-                # export plots
-                fig0.savefig(os.path.join(figure_dir,
-                            '{}_small_{}.png'.format(config['Calibrated Figures']['basename'],dynamic_title_extension)))
-                fig1.savefig(os.path.join(figure_dir, 
-                            '{}_large_{}.png'.format(config['Calibrated Figures']['basename'],dynamic_title_extension)))
 
     # create figures for the difference in magnitude. The output figures are 
     # then stored in their respective case directory
@@ -317,18 +168,94 @@ class Figures:
                 
 
 
-
     # create figure that combines the calibrated spectra across different
     # cases
     def all_obs_fig(self):
-        pass
+        order_list = config['All Observation Figures']['regroup'].split(',')
+        self.ol = order_list
+        def obs_fig_recur(lst, order):
+            if len(order) == 1:
+                attr = order[0]
+                spect_group = self._reshape(lst, attr)
+
+                ncols = int(config['Figure Parameters']['n_columns'])
+                fig0 = plt.figure(figsize=(20,20)) # figure of individal spectra with ref
+                ax0 = fig0.subplots(nrows=math.ceil(len(spect_group)/ncols) + 1, ncols=ncols)
+                subplot_tracker = [] # keeps track of the subplots that has been used
+
+                for i,s in enumerate(spect_group):
+                    # generate title extension for each plot
+                    title_extension = ' ( '
+                    for key in self.ol:
+                        title_extension += '{}={} '.format(key, s[0].params[key])
+                    title_extension += ')'
+                
+                    # subplot graph labels
+                    title = config['All Observation Figures']['title_base'] + title_extension
+                    x_axis = config['All Observation Figures']['x_axis']
+                    y_axis = config['All Observation Figures']['y_axis']
+
+                    # constructing actual subplot graphs
+                    x_coord = math.floor(i / ncols)
+                    y_coord = i % ncols
+                    subplot_tracker.append(ax0[x_coord, y_coord])
+                    ax0[x_coord, y_coord].set_title(title)
+                    ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
+
+                    # plotting a spectrum for each case in the subplots
+                    for j,spect in enumerate(s):
+                        masked_wvs = spect.wvs
+                        if boolean(config['All Observation Figures']['masking']):
+                            masked_wvs = self._mask_wvs(masked_wvs)
+                        ax0[x_coord, y_coord].errorbar(masked_wvs, spect.calib_spect, yerr=spect.calib_error, 
+                                                        label=config['Figure Parameters']['legend_label'], capsize=3, 
+                                                        color=self.colors[j])
+                    
+                    
+                    # adding reference to subplot
+                    ref_path = config['All Observation Figures']['reference_path']
+                    if ref_path != '':
+                        if not os.path.isfile(ref_path):
+                            raise Exception('Please enter a valid path to reference')
+                        ref_spect = self._get_ref_spectra(ref_path)
+                        if ref_spect.err_q:
+                            ax0[x_coord, y_coord].errorbar(ref_spect.wvs, ref_spect.uncalib_spect, yerr=ref_spect.uncalib_error, 
+                                                            label=config['All Observation Figures']['reference_label'], capsize=3, 
+                                                            color='C0')
+                        else:
+                            ax0[x_coord, y_coord].plot(ref_spect.wvs, ref_spect.uncalib_spect,
+                                                        label=config['All Observation Figures']['reference_label'],
+                                                        color='C0')
+                    
+                    ax0[x_coord,y_coord].legend()
+
+                # loop through all the axes in ax0 and determine if it has been used.
+                # If not, delete the subplot
+                for a in ax0.flatten():
+                    if not(a in subplot_tracker):
+                        fig0.delaxes(a)
+                fig0.tight_layout()
+
+                # export plots
+                fig0.savefig(os.path.join(self.root_figures_dir,
+                            '{} {}.png'.format(config['All Observation Figures']['basename'],title_extension)))
+
+                    
+
+            else:
+                curr_order = order[0]
+                o = order[1:]
+                reshpaed_list = self._reshape(lst, curr_order)
+                for l in reshpaed_list:
+                    obs_fig_recur(l, o)
+        
+        # concatenate all spectra list in self.cases into one giant list
+        all_spectra = []
+        for casename, spect_list in self.cases.items():
+            all_spectra += spect_list
+        
+        obs_fig_recur(all_spectra, order_list)
     
-
-
-
-
-
-
 
 
 
@@ -348,7 +275,7 @@ class Figures:
         numbasis_str = config['Klip-static']['numbasis'].split(',')
 
         # parse directory name to get params
-        param = {}
+        param = {'case':remove_n_path_levels(directory, 3)}
         dir_in_list = os.path.basename(directory).split('_')
         for i in range(1,len(dir_in_list) - 1):
             param_in_list = dir_in_list[i].split('=')
@@ -397,6 +324,7 @@ class Figures:
             else:
                 result.append([spect])
         return result
+
         
     # from the config file, read in the location of the reference spectra, 
     # find the reference spectra, and retrun a Spectrum object
@@ -437,8 +365,106 @@ class Figures:
         if val >= rang[0] and val <= rang[1]:
             return True
         return False
+    
+
+    # since self.uncalib_fig and self.calib_fig are extremely similar in 
+    # functionality, both their functions can be generalized with the 
+    # function self._plot_small_large_spect which takes in a key string 
+    # for a section of the config file.
+    def _plot_small_large_spect(self, key_string):
+        # check if entered key string exists in the config file
+        if not config.has_section(key_string):
+            raise Exception('The entered key string does not exist!')
+
+        # iterate through all the cases
+        for casename, spectra in self.cases.items():
+            figure_dir = self.case_to_figure_dir[casename]
+            s = self._reshape(spectra, config['Figure Parameters']['regroup'])
+
+            # then iterate thorugh each parameter group specified
+            for spect_group in s:
+                ncols = int(config['Figure Parameters']['n_columns'])
+                fig0 = plt.figure(figsize=(20,20)) # figure of individal spectra with ref
+                ax0 = fig0.subplots(nrows=math.ceil(len(spect_group)/ncols) + 1, ncols=ncols)
+                subplot_tracker = [] # keeps track of the subplots that has been used
+                fig1,ax1 = plt.subplots()
+                for i,spect in enumerate(spect_group):
+                    title_extension = ' ( '
+                    dynamic_title_extension = ' ( '
+                    for key,val in spect.params.items():
+                        title_extension = title_extension + '{}={} '.format(key, val)
+                        if key == config['Figure Parameters']['regroup']:
+                            dynamic_title_extension = dynamic_title_extension + '{}={}'.format(key,val)
+                    title_extension = title_extension + ')'
+                    dynamic_title_extension = dynamic_title_extension + ')'
+
+                    # small graph labels
+                    title = config[key_string]['small_title_base'] + title_extension
+                    x_axis = config[key_string]['small_x_axis']
+                    y_axis = config[key_string]['small_y_axis']
+
+                    # constructing actual subplot of small graphs
+                    x_coord = math.floor(i / ncols)
+                    y_coord = i % ncols
+                    subplot_tracker.append(ax0[x_coord, y_coord])
+                    masked_wvs = spect.wvs
+                    if boolean(config[key_string]['masking']):
+                        masked_wvs = self._mask_wvs(masked_wvs)
+                    ax0[x_coord, y_coord].set_title(title)
+                    ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
+
+                    # compares with section name of uncalibrated figures in config
+                    if key_string == 'Uncalibrated Figures':  
+                        ax0[x_coord, y_coord].errorbar(masked_wvs, spect.uncalib_spect, yerr=spect.uncalib_error, 
+                                                        label=config['Figure Parameters']['legend_label'], capsize=3, 
+                                                        color=self.colors[0])
+                    elif key_string == 'Calibrated Figures':
+                        ax0[x_coord, y_coord].errorbar(masked_wvs, spect.calib_spect, yerr=spect.calib_error, 
+                                                        label=config['Figure Parameters']['legend_label'], capsize=3, 
+                                                        color=self.colors[0])
+                    
+                    # large graph labels
+                    title = config[key_string]['large_title_base'] + dynamic_title_extension
+                    x_axis = config[key_string]['large_x_axis']
+                    y_axis = config[key_string]['large_x_axis']
+
+                    # a composition of all the graphs
+                    ax1.set_title(title)
+                    ax1.set(xlabel=x_axis, ylabel=y_axis)
+                    ax1.plot(masked_wvs, spect.uncalib_spect, label=title_extension)
+
+                    # adding reference to subplot
+                    ref_path = config[key_string]['reference_path']
+                    if ref_path != '':
+                        if not os.path.isfile(ref_path):
+                            raise Exception('Please enter a valid path to reference')
+                        ref_spect = self._get_ref_spectra(ref_path)
+                        if ref_spect.err_q:
+                            ax0[x_coord, y_coord].errorbar(ref_spect.wvs, ref_spect.uncalib_spect, yerr=ref_spect.uncalib_error, 
+                                                            label=config[key_string]['reference_label'], capsize=3, 
+                                                            color='C0')
+                        else:
+                            ax0[x_coord, y_coord].plot(ref_spect.wvs, ref_spect.uncalib_spect,
+                                                        label=config[key_string]['reference_label'],
+                                                        color='C0')
+                    ax0[x_coord,y_coord].legend()
+                    ax1.legend(prop={'size': 6})
+
+                # loop through all the axes in ax0 and determine if it has been used.
+                # If not, delete the subplot
+                for a in ax0.flatten():
+                    if not(a in subplot_tracker):
+                        fig0.delaxes(a)
+                fig0.tight_layout()
+
+                # export plots
+                fig0.savefig(os.path.join(figure_dir,
+                            '{}_small_{}.png'.format(config[key_string]['basename'],dynamic_title_extension)))
+                fig1.savefig(os.path.join(figure_dir, 
+                            '{}_large_{}.png'.format(config[key_string]['basename'],dynamic_title_extension)))
 
 f = Figures()
 f.uncalib_fig()
 f.calib_fig()
 f.mag_fig()
+f.all_obs_fig()
