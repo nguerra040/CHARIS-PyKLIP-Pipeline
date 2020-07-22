@@ -72,25 +72,30 @@ class Figures:
 
     # create figues for spectra that is not calibrated. The output figures are 
     # then stored in their respective case directory
-    def uncalib_fig(self):
+    def uncalib_fig(self, overwrite=False):
         # argument is section name of uncalibrated figures in config
-        self._plot_small_large_spect('Uncalibrated Figures')
+        self._plot_small_large_spect('Uncalibrated Figures', overwrite)
 
 
     # create figures for spectra that is calibrated. The output figures are 
     # then stored in their respective case directory
-    def calib_fig(self):
+    def calib_fig(self, overwrite=False):
         # argument is section name of uncalibrated figures in config
-        self._plot_small_large_spect('Calibrated Figures')
+        self._plot_small_large_spect('Calibrated Figures', overwrite)
 
 
     # create figures for the difference in magnitude. The output figures are 
     # then stored in their respective case directory
-    def mag_fig(self):
+    def mag_fig(self, overwrite=False):
         bands = {'J': 1.252, 'H': 1.6365, 'K': 2.197}
         # iterate through all the cases
         for casename, spectra in self.cases.items():
             figure_dir = self.case_to_figure_dir[casename]
+
+            # case where there are existing figures
+            if not overwrite and self._file_with_name(figure_dir, config['Magnitude Figures']['basename']):
+                continue
+
             s = self._reshape(spectra, config['Figure Parameters']['regroup'])
             # then iterate thorugh each parameter group specified
             for spect_group in s:
@@ -170,7 +175,12 @@ class Figures:
 
     # create figure that combines the calibrated spectra across different
     # cases
-    def all_obs_fig(self):
+    def all_obs_fig(self, overwrite=False):
+        # case where there are existing figures
+        fs = os.listdir(self.root_figures_dir)
+        if not overwrite and fs != 0:
+            return
+
         order_list = config['All Observation Figures']['regroup'].split(',')
         self.ol = order_list
         def obs_fig_recur(lst, order):
@@ -366,12 +376,18 @@ class Figures:
             return True
         return False
     
+    def _file_with_name(self, path, name):
+        files = glob.glob(os.path.join(path, '*.png'))
+        for f in files:
+            if name in os.path.basename(f):
+                return True
+        return False
 
     # since self.uncalib_fig and self.calib_fig are extremely similar in 
     # functionality, both their functions can be generalized with the 
     # function self._plot_small_large_spect which takes in a key string 
     # for a section of the config file.
-    def _plot_small_large_spect(self, key_string):
+    def _plot_small_large_spect(self, key_string, overwrite):
         # check if entered key string exists in the config file
         if not config.has_section(key_string):
             raise Exception('The entered key string does not exist!')
@@ -379,6 +395,11 @@ class Figures:
         # iterate through all the cases
         for casename, spectra in self.cases.items():
             figure_dir = self.case_to_figure_dir[casename]
+
+            # case where there are existing figures
+            if not overwrite and self._file_with_name(figure_dir, config[key_string]['basename']):
+                continue
+
             s = self._reshape(spectra, config['Figure Parameters']['regroup'])
 
             # then iterate thorugh each parameter group specified
