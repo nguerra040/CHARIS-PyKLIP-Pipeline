@@ -6,13 +6,14 @@ import itertools
 import numpy as np
 import pandas as pd
 import sys, os.path
+from astropy.io import fits
 import matplotlib.pyplot as plt
 from uncertainties import ufloat
 from uncertainties import unumpy
 
 sys.path.append(os.path.abspath('../'))
 from pipeline.settings import config
-from pipeline.helpers import boolean, remove_n_path_levels
+from pipeline.helpers import boolean, remove_n_path_levels, get_star_spot_ratio
 
 # a Spectrum object will only contain information regarding 1
 # spectrum along with the parameters associated with that spectrum
@@ -37,6 +38,24 @@ class Figures:
         self.root_figures_dir = os.path.join(self.root_dir, 'results/figures')
         self.case_dirs = config['Paths']['case_dir'].split(',')
         self.figures_dirs = []
+
+        self.klipfm_files = {}
+        for case in self.case_dirs:
+            basename = os.path.join(case, 'klip/klipped/fm_spectra')
+            path_to_name = os.path.join(self.root_dir, basename)
+            temp = []
+            for dirpath, subdirs, files in os.walk(path_to_name):
+                for x in files:
+                    if x.endswith(".fits"):
+                        temp.append(os.path.join(dirpath, x))
+            
+            if len(temp) == 0:
+                raise Exception('There are no klipped images for case {}!'.format(case))
+
+            self.klipfm_files.update({os.path.basename(case):temp[0]})
+            
+
+
         self.case_to_figure_dir = {}
         for i,case in enumerate(self.case_dirs):
             self.figures_dirs.append(os.path.join(case, 'results/figures'))
@@ -44,6 +63,7 @@ class Figures:
                 self.case_dirs[i] = os.path.join(self.root_dir,case)
                 self.figures_dirs[i] = os.path.join(self.root_dir,self.figures_dirs[i])
                 self.case_to_figure_dir.update({os.path.basename(case):self.figures_dirs[i]})
+
 
             
         # check if figure directory exists. If not, create it.
@@ -104,7 +124,20 @@ class Figures:
                 # add lines to plot
                 for i,spect in enumerate(spect_group):
                     # find the satellite to spot ratio
-                    spot_to_star_ratio = np.array([2.72*(10**-3)/(lamb/1.55)**2 for lamb in spect.wvs])
+                    fits_image_filename = self.klipfm_files[casename]
+                    hdul = fits.open(fits_image_filename)
+                    hdr = hdul[0].header
+                    try:
+                        mod = float(hdr['X_GRDAMP'])
+                    except:
+                        return
+                    mjd = float(hdr['MJD'])
+                    
+                    if boolean(config['Magnitude Figures']['manual_attenutation_factor']) != None:
+                        mod = float(config['Magnitude Figures']['manual_attenutation_factor'])
+                    mod *= 1000
+
+                    spot_to_star_ratio = get_star_spot_ratio(mod, spect.wvs, mjd, manual=boolean(config['Magnitude Figures']['manual_attenutation_factor']))
 
                     # find a list of slice values that correspond to the bands J, H, and K
                     corresponding_slices = []
@@ -178,7 +211,7 @@ class Figures:
     def all_obs_fig(self, overwrite=False):
         # case where there are existing figures
         fs = os.listdir(self.root_figures_dir)
-        if not overwrite and fs != 0:
+        if not overwrite and len(fs) != 0:
             return
 
         order_list = config['All Observation Figures']['regroup'].split(',')
@@ -211,6 +244,7 @@ class Figures:
                     subplot_tracker.append(ax0[x_coord, y_coord])
                     ax0[x_coord, y_coord].set_title(title)
                     ax0[x_coord, y_coord].set(xlabel=x_axis, ylabel=y_axis)
+                    ax0[x_coord, y_coord].set_ylim([0,3])
 
                     # plotting a spectrum for each case in the subplots
                     for j,spect in enumerate(s):
@@ -218,7 +252,7 @@ class Figures:
                         if boolean(config['All Observation Figures']['masking']):
                             masked_wvs = self._mask_wvs(masked_wvs)
                         ax0[x_coord, y_coord].errorbar(masked_wvs, spect.calib_spect, yerr=spect.calib_error, 
-                                                        label=config['Figure Parameters']['legend_label'], capsize=3, 
+                                                        label=os.path.basename(spect.params['case']), capsize=3, 
                                                         color=self.colors[j])
                     
                     
@@ -413,9 +447,10 @@ class Figures:
                     title_extension = ' ( '
                     dynamic_title_extension = ' ( '
                     for key,val in spect.params.items():
-                        title_extension = title_extension + '{}={} '.format(key, val)
-                        if key == config['Figure Parameters']['regroup']:
-                            dynamic_title_extension = dynamic_title_extension + '{}={}'.format(key,val)
+                        if key != 'case':
+                            title_extension = title_extension + '{}={} '.format(key, val)
+                            if key == config['Figure Parameters']['regroup']:
+                                dynamic_title_extension = dynamic_title_extension + '{}={} '.format(key,val)
                     title_extension = title_extension + ')'
                     dynamic_title_extension = dynamic_title_extension + ')'
 
@@ -484,8 +519,9 @@ class Figures:
                 fig1.savefig(os.path.join(figure_dir, 
                             '{}_large_{}.png'.format(config[key_string]['basename'],dynamic_title_extension)))
 
-f = Figures()
-f.uncalib_fig()
-f.calib_fig()
-f.mag_fig()
-f.all_obs_fig()
+#f = Figures()
+#f.uncalib_fig(overwrite=True)
+#f.calib_fig(overwrite=True)
+#f.mag_fig(overwrite=True)
+#f.all_obs_fig(overwrite=True)
+                

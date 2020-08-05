@@ -1,11 +1,13 @@
 import os
 import glob
+import copy
 import subprocess
 import numpy as np
 import pandas as pd
 import configparser
 from uncertainties import ufloat
 from scipy import stats as spstat
+from scipy import interpolate
 
 import pyklip.fm as fm
 import pyklip.fakes as fakes
@@ -19,9 +21,7 @@ from .helpers import boolean, get_bash_path, get_star_spot_ratio
 # Set the value of the system environment variable $PYSTN_CDBS
 # to be the location of the pysynphot cdbs directory.
 cdbs_path = config['Paths']['cdbs_dir']
-bash_command = 'export PYSYN_CDBS={}'.format(get_bash_path(cdbs_path))
-output = os.system(bash_command)
-print("output: ", output)
+os.environ['PYSYN_CDBS'] = cdbs_path
 import pysynphot as S
 
 # A KLIP object is tasked with completing stage 2 of the 
@@ -75,10 +75,24 @@ class KLIP:
             self.skipslices = []
         else:
             self.skipslices = list(map(int, config['Readin']['skipslices'].split(",")))
+
+        # set the guessing spot location and index if specified
+        guess_spot_loc = config['Readin']['guess_spot_loc']
+        if guess_spot_loc == '':
+            guess_spot_loc = None
+            guess_spot_index = 0
+        else:
+            guess_spot_loc = guess_spot_loc.split('|')
+            for i,loc in enumerate(guess_spot_loc):
+                guess_spot_loc[i] = list(map(float,loc.split(',')))
+            guess_spot_index = int(config['Readin']['guess_spot_index'])
+
         # read in image files as a charis object
         self.dataset = charis.CHARISData(self.data,
                                         skipslices=self.skipslices, 
-                                        update_hdrs=boolean(config['Readin']['updatehdrs']))
+                                        update_hdrs=boolean(config['Readin']['updatehdrs']),
+                                        guess_spot_locs=guess_spot_loc,
+                                        guess_spot_index=guess_spot_index)
         # generate a PSF cube for that dataset from satellite spots
         self.dataset.generate_psfs(int(self.parameters['boxrad']))
         self.PSF_cube = self.dataset.psfs
@@ -150,6 +164,10 @@ class KLIP:
                             save_klipped=boolean(self.parameters['saveklipped']), 
                             highpass=boolean(self.parameters['highpass']),
                             outputdir=self.klipped_fm_spectra_dir)
+
+            # interpolate the nan values in the forward model
+            print('################## NAN',np.argwhere(np.isnan(self.dataset.fmout[:,:,-1,:])))
+            self._interpolate_fm(self.dataset)
 
             # invert the FM to get the spectra
             self.exspect, self.fm_matrix = es.invert_spect_fmodel(self.dataset.fmout, 
@@ -246,7 +264,7 @@ class KLIP:
                     self.exspect_ufloat_calibrated = self.exspect_ufloat * star_spectrum * spot_to_star_ratio
 
                     #export spectra data as csv file
-                    self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated')
+                    self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated')            
 
 
     # Helper function for self.klip_fm_spect. Function injects fake planets 
@@ -290,6 +308,10 @@ class KLIP:
                         highpass=boolean(self.parameters['highpass']),
                         outputdir=os.path.join(self.fakes_dir, str(basis)))
             
+            # interpolate the nan values in the forward model
+            print('################## NAN',np.argwhere(np.isnan(tempdataset.fmout[:,:,-1,:])))
+            self._interpolate_fm(tempdataset)
+
             exspect_fake, fm_matrix_fake = es.invert_spect_fmodel(tempdataset.fmout, 
                                                                 tempdataset, 
                                                                 units=self.parameters['units'],
@@ -304,7 +326,12 @@ class KLIP:
 
         # same separation as the real planet, equal radial spacing between 
         # the n fake planets
-        pas = (np.linspace(self.planet_pa, self.planet_pa+360, num=nplanets+2)%360)[1:-1] 
+        range_angle = config['Errorbars']['range_angle']
+        positive = (np.linspace(self.planet_pa, (self.planet_pa + range_angle), num=nplanets+1) % 360)[1:]
+        negative = (np.linspace(self.planet_pa, (self.planet_pa - range_angle), num=nplanets+1) % 360)[1:]
+        pas = np.sort(np.unique(np.concatenate([positive,negative])))
+    
+        #pas = (np.linspace(self.planet_pa, self.planet_pa+360, num=nplanets+2)%360)[1:-1] 
         fake_spectra_all_bases = []
 
         # iterate through all the requested modes
@@ -333,11 +360,11 @@ class KLIP:
         mjd_list = [header['MJD'] for header in self.dataset.prihdrs]
 
         # check if all the modulations are the same 
-        if len(mod_list) == 0 or mod_list.count(mod_list[0]) == len(mod_list): 
+        if len(mod_list) == 0 or mod_list.count(mod_list[0]) != len(mod_list): 
             raise Exception('There is no modulation amplitude or there are multiple')
         if max(mjd_list) - min(mjd_list) > 1:
             raise Exception('Cubes are not from the same observation night')
-        mod = mod_list[0] * 100 # to convert from um to nm
+        mod = mod_list[0] * 1000 # to convert from um to nm
         wvs = self.dataset.wvs[0:self.nl]
         mjd = mjd_list[0]
 
@@ -372,4 +399,41 @@ class KLIP:
         df.to_csv(os.path.join(self.spectra_dir, prefix + "_spectra_error.csv"))
 
 
-        
+    # interplates the nan values so that the fm won't have nans
+    def _interpolate_fm(self, dataset):
+        klipped = dataset.fmout[:,:,-1,:]
+        hoz = klipped.shape[2]
+        nan_locs = np.argwhere(np.isnan(klipped))
+        if nan_locs.size == 0:
+            return None
+        for loc in nan_locs:
+            if not np.isnan(klipped[tuple(loc)]):
+                continue
+
+            loc_left = copy.deepcopy(loc)
+            loc_right = copy.deepcopy(loc)
+            
+            while np.isnan(klipped[tuple(loc_left)]) and loc_left[2] > 0:
+                loc_left[2] -= 1
+
+            while np.isnan(klipped[tuple(loc_right)]) and loc_right[2] < hoz - 1:
+                loc_right[2] += 1
+            
+            print(loc_left, loc_right)
+
+            if np.isnan(klipped[tuple(loc_right)]) and np.isnan(klipped[tuple(loc_left)]):
+                raise Exception("Please take a look at a particular slice {}".format(loc_left[1]))
+            elif np.isnan(klipped[tuple(loc_right)]) and not np.isnan(klipped[tuple(loc_left)]):
+                for i in range(loc_left[2] + 1, hoz):
+                    klipped[(loc[0],loc[1],i)] = klipped[tuple(loc_left)]
+            elif not np.isnan(klipped[tuple(loc_right)]) and np.isnan(klipped[tuple(loc_left)]):
+                for i in range(loc_right[2]):
+                    klipped[(loc[0],loc[1],i)] = klipped[tuple(loc_right)]
+            else:
+                x = [loc_left[2], loc_right[2]]
+                y = [klipped[tuple(loc_left)], klipped[tuple(loc_right)]]
+                f = interpolate.interp1d(x, y)
+                for i in range(loc_left[2]+1, loc_right[2]):
+                    klipped[(loc[0],loc[1],i)] = f(i)
+
+        return klipped
