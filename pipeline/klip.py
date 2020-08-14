@@ -326,7 +326,7 @@ class KLIP:
 
         # same separation as the real planet, equal radial spacing between 
         # the n fake planets
-        range_angle = config['Errorbars']['range_angle']
+        range_angle = float(config['Errorbars']['range_angle'])
         positive = (np.linspace(self.planet_pa, (self.planet_pa + range_angle), num=nplanets+1) % 360)[1:]
         negative = (np.linspace(self.planet_pa, (self.planet_pa - range_angle), num=nplanets+1) % 360)[1:]
         pas = np.sort(np.unique(np.concatenate([positive,negative])))
@@ -337,7 +337,7 @@ class KLIP:
         # iterate through all the requested modes
         for i in range(len(self.numbasis)): 
             input_spect = self.exspect[i,:]
-            fake_spectra = np.zeros((nplanets, self.nl))
+            fake_spectra = np.zeros((len(pas), self.nl))
 
             # iterate through all the requested planets
             for p, pa in enumerate(pas): 

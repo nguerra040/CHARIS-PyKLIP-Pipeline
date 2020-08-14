@@ -253,7 +253,7 @@ class Figures:
                             masked_wvs = self._mask_wvs(masked_wvs)
                         ax0[x_coord, y_coord].errorbar(masked_wvs, spect.calib_spect, yerr=spect.calib_error, 
                                                         label=os.path.basename(spect.params['case']), capsize=3, 
-                                                        color=self.colors[j])
+                                                        color=('C'+str(j+1)))
                     
                     
                     # adding reference to subplot
@@ -271,7 +271,7 @@ class Figures:
                                                         label=config['All Observation Figures']['reference_label'],
                                                         color='C0')
                     
-                    ax0[x_coord,y_coord].legend()
+                    #ax0[x_coord,y_coord].legend()
 
                 # loop through all the axes in ax0 and determine if it has been used.
                 # If not, delete the subplot
@@ -487,7 +487,10 @@ class Figures:
                     # a composition of all the graphs
                     ax1.set_title(title)
                     ax1.set(xlabel=x_axis, ylabel=y_axis)
-                    ax1.plot(masked_wvs, spect.uncalib_spect, label=title_extension)
+                    if key_string == 'Uncalibrated Figures':  
+                        ax1.plot(masked_wvs, spect.uncalib_spect, label=title_extension)
+                    elif key_string == 'Calibrated Figures':
+                        ax1.plot(masked_wvs, spect.calib_spect, label=title_extension)
 
                     # adding reference to subplot
                     ref_path = config[key_string]['reference_path']
