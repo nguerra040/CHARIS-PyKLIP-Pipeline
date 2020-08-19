@@ -12,20 +12,32 @@ sys.path.append(os.path.abspath('../'))
 from pipeline.settings import config
 from load_data import Data
 
-class Anderson_Darling_Test:
+class Stats_Test:
 
     def __init__(self):
         # define root dir
         self.root_dir = config['Paths']['root_dir']
-        # setup test ouput dir
-        self.test_results_dir = os.path.join(self.root_dir, 'results/stat_tests/' + config['Anderson Darling Test']['dir_name'])
-        if not os.path.exists(self.test_results_dir):
-            os.makedirs(self.test_results_dir)
+
+        # setup anderson darking test ouput dir
+        self.ad_test_results_dir = os.path.join(self.root_dir, 'results/stat_tests/' + config['Anderson Darling Test']['dir_name'])
+        if not os.path.exists(self.ad_test_results_dir):
+            os.makedirs(self.ad_test_results_dir)
+
+        # setup variance ouput dir
+        self.variance_results_dir = os.path.join(self.root_dir, 'results/stat_tests/' + config['Data Variance']['dir_name'])
+        if not os.path.exists(self.variance_results_dir):
+            os.makedirs(self.variance_results_dir)
+
+        # setup histogram output dir
+        self.histogram_results_dir = os.path.join(self.root_dir, 'results/stat_tests/' + config['Histogram']['dir_name'])
+        if not os.path.exists(self.histogram_results_dir):
+            os.makedirs(self.histogram_results_dir)
 
         # istantiate a Data object
         self.data = Data()
 
-    def perform_k_samp_test(self):
+    # perfrom the anderson darling k-sample test
+    def ad_k_samp_test(self):
         # uncalibrated dataframe
         uncalib_df = pd.DataFrame()
         calib_df = pd.DataFrame()
@@ -111,27 +123,10 @@ class Anderson_Darling_Test:
             calib_df = calib_df.append(calib_csv_row, ignore_index=True)
 
         # export df as csv
-        uncalib_df.to_csv(os.path.join(self.test_results_dir, uncalib_file_name))
-        calib_df.to_csv(os.path.join(self.test_results_dir, calib_file_name))
+        uncalib_df.to_csv(os.path.join(self.ad_test_results_dir, uncalib_file_name))
+        calib_df.to_csv(os.path.join(self.ad_test_results_dir, calib_file_name))
 
         return (uncalib_df, calib_df)
-            
-
-
-
-class Data_Variance:
-
-    def __init__(self):
-        # define root dir
-        self.root_dir = config['Paths']['root_dir']
-
-        # setup test ouput dir
-        self.test_results_dir = os.path.join(self.root_dir, 'results/stat_tests/' + config['Data Variance']['dir_name'])
-        if not os.path.exists(self.test_results_dir):
-            os.makedirs(self.test_results_dir)
-
-        # istantiate a Data object
-        self.data = Data()
 
     def get_variance(self, spacing, n_samples):
         # stores all the dynamic params and their list
@@ -198,9 +193,6 @@ class Data_Variance:
                 # calculate the mean
                 mean_uncalib = self._get_mean(arr_uncalib, spacing, n_samples)
                 mean_calib = self._get_mean(arr_calib, spacing, n_samples)
-
-                # get the histogram
-                self._get_histogram(arr_calib, param_dict, wv)
             
                 # make dictinary to represent new df row
                 ret_row = copy.deepcopy(param_dict)
@@ -210,11 +202,75 @@ class Data_Variance:
                 ret_df = ret_df.append(ret_row, ignore_index=True)
 
         file_name = 'spacing=' + str(spacing) + '_variance.csv'
-        ret_df.to_csv(os.path.join(self.test_results_dir, file_name))
+        ret_df.to_csv(os.path.join(self.variance_results_dir, file_name))
         
         return ret_df
 
+
+    def get_histogram(self):
+        # stores all the dynamic params and their list
+        params = {}
+
+        # set KL as a param
+        KLs = list(map(int, config['Klip-static']['numbasis'].split(',')))
+        params.update({'KL':KLs})
         
+        # set all the dynamic variables in Klip-dynamic params
+        for item in config['Klip-dynamic'].items():
+            l = item[1].split(',')
+            if l[0].isnumeric():
+                l = list(map(float,l))
+            params.update({item[0]:l})
+
+        # separate key and values into separate lists for easier permutations
+        key_list = []
+        val_list = []
+        for key,val in params.items():
+            key_list.append(key)
+            val_list.append(val)
+
+        # get all combinations of data in the val list
+        comb = list(itertools.product(*val_list))
+
+        # the dataframe to be exported at the very end
+        ret_df = pd.DataFrame()
+        
+        # iterate through all the combinations and perform the adt
+        for tupl in comb:
+            param_dict = {}
+            for i,key in enumerate(key_list):
+                param_dict.update({key:tupl[i]})
+            
+            # get the corresponding df rows for the adt
+            rows = self.data.get_rows(param_dict)
+
+            # iterate through all the rows in rows to get the list of 
+            # uncalibrated spectra, calibrated spectra, and cases
+            cases = []
+            uncalib_list = []
+            calib_list = []
+            for i, row in rows.iterrows():
+                cases.append(row['case'])
+                uncalib_list.append(row['uncalibrated spectrum'])
+                calib_list.append(row['calibrated spectrum'])
+
+            # iterate through each wavelength 
+            wvs = rows['wvs'].iloc[0]
+            for i, wv in enumerate(wvs):
+                # tranpose the array so that each 1st order list will represent all the values at 1 wavelength
+                t_uncalib = np.array(uncalib_list).transpose()
+                t_calib = np.array(calib_list).transpose()
+
+                # get the proper wavelength
+                arr_uncalib = t_uncalib[i]
+                arr_calib = t_calib[i]
+
+                # get the histogram
+                self._get_histogram(arr_calib, param_dict, wv, True)
+                self._get_histogram(arr_uncalib, param_dict, wv, False)
+
+        return ret_df
+
 
     # helper function to get the variance of elements in a list
     def _get_variance(self, arr, spacing, n_samples):
@@ -248,7 +304,7 @@ class Data_Variance:
         mean = statistics.mean(arr_want)
         return mean
 
-    def _get_histogram(self, arr, params, wv):
+    def _get_histogram(self, arr, params, wv, calibq):
         # calculate elements to find variance for given an index spacing 
         arr_want = arr
 
@@ -256,10 +312,13 @@ class Data_Variance:
         plt.clf()
         
         # generate histogram
-        plt.hist(arr_want, bins=int(config['Data Variance']['n_bins']))
+        plt.hist(arr_want, bins=int(config['Histogram']['n_bins']))
 
         # generate the file name
-        basename = 'histogram'
+        if calibq:
+            basename = 'calib_histogram'
+        else:
+            basename = 'uncalib_histogram'
         descriptor = ''
         for key,val in params.items():
             descriptor += '_{}={}'.format(key, val)
@@ -269,22 +328,12 @@ class Data_Variance:
 
         print(os.getcwd())
         # save the figure
-        plt.savefig(os.path.join(self.test_results_dir, file_name))
+        plt.savefig(os.path.join(self.histogram_results_dir, file_name))
 
 
-
-
-
-
-        
-
-        
-#adt = Anderson_Darling_Test()
-#adt.perform_k_samp_test()
-
-var = Data_Variance()
-for i in range(1,7):
-    var.get_variance(i, 5)
+s = Stats_Test()
+s.ad_k_samp_test()
+#s.get_histogram()
         
 
 

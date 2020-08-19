@@ -6,8 +6,11 @@ import numpy as np
 import pandas as pd
 import configparser
 from uncertainties import ufloat
+import matplotlib.pyplot as plt
 from scipy import stats as spstat
 from scipy import interpolate
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 import pyklip.fm as fm
 import pyklip.fakes as fakes
@@ -341,6 +344,11 @@ class KLIP:
 
             # iterate through all the requested planets
             for p, pa in enumerate(pas): 
+                # test if the particular pa and sep for the fake planet is valid
+                if not self._is_valid(pa, self.planet_sep):
+                    print('A parallactic angle of {} is not valid!'.format(pa))
+                    continue
+
                 basis_dir = os.path.join(self.fakes_dir, str(self.numbasis[i]))
                 if not os.path.exists(basis_dir):
                     os.makedirs(basis_dir)
@@ -435,5 +443,170 @@ class KLIP:
                 f = interpolate.interp1d(x, y)
                 for i in range(loc_left[2]+1, loc_right[2]):
                     klipped[(loc[0],loc[1],i)] = f(i)
-
         return klipped
+
+    
+    # helper function to determine if a pixel is within the pa and sep ranges
+    def _within_range_q(self, coord, pa_range, sep_range, n_set):
+        sep = np.sqrt((coord[0] - self.dataset.centers[n_set][0])**2 + (coord[1] - self.dataset.centers[n_set][1])**2)
+
+        numer = coord[1] - self.dataset.centers[n_set][1]
+        denom = coord[0] - self.dataset.centers[n_set][0]
+        if numer >= 0 and denom >= 0:
+            pa = np.arctan(numer / denom) * 180 / np.pi
+        elif numer >=0 and denom < 0:
+            pa = np.arctan(numer / denom) * 180 / np.pi + 180
+        elif numer < 0 and denom >= 0:
+            pa = np.arctan(numer / denom) * 180 / np.pi + 360
+        else:
+            pa = np.arctan(numer / denom) * 180 / np.pi + 180
+
+        pa = (pa - 90) % 360
+        
+        sep_q = False
+        if sep >= sep_range[0] and sep <= sep_range[1]:
+            sep_q = True
+        
+        if not sep_q:
+            return False
+        
+        pa_q = False
+        if pa_range[0] < pa_range[1]:
+            pa_q = pa_range[0] <= pa and pa <= pa_range[1]
+        else:
+            pa_q = pa_range[0] <= pa or pa <= pa_range[1]
+
+        return pa_q
+
+    # helper function to get the corresponding pixels given a pa and a sep range
+    def _get_pixels(self, pa_range, sep_range, n_set):
+        y_pixels = self.dataset.input.shape[1]
+        x_pixels = self.dataset.input.shape[2]
+
+        pixels_arr = []
+
+        for y in range(y_pixels):
+            for x in range(x_pixels):
+                coord = (x,y)
+                if self._within_range_q(coord, pa_range, sep_range, n_set):
+                    pixels_arr.append(coord)
+
+        pixels = set(pixels_arr)
+        return pixels
+
+    # helper function to get the spot pixels
+    def _get_spot_pixels(self, n_set):
+        pixel_arr = []
+
+        slice_spots = self.dataset.spot_locs[n_set]
+        for spot in slice_spots:
+            spot_x = np.round(spot[0])
+            spot_y = np.round(spot[1])
+
+            spot_x_low = int(spot_x - self.stamp_size)
+            spot_x_high = int(spot_x + self.stamp_size)
+            spot_y_low = int(spot_y - self.stamp_size)
+            spot_y_high = int(spot_y + self.stamp_size)
+
+            x_arr = range(spot_x_low, spot_x_high + 1)
+            y_arr = range(spot_y_low, spot_y_high + 1)
+
+            spot_pixels = [(x,y) for x in x_arr for y in y_arr]
+
+            pixel_arr += spot_pixels
+        
+        pixels = set(pixel_arr)
+        return pixels
+
+    # helper function to determine if the fake planet is touching a satellite spot
+    def _is_touching_spot(self, fake_pixels, n_set):
+        spot_pixels = self._get_spot_pixels(n_set)
+        #print(spot_pixels)
+        #self._plot_pixels(spot_pixels,'spot pixels in _is_touching_spot')
+        #self._plot_pixels(fake_pixels, 'fake pixels in _is_touching_spot')
+        #print(fake_pixels)
+
+        if (spot_pixels & fake_pixels) != set():
+            self._display_overlap(spot_pixels, fake_pixels, 'spot and fake planet overlap')
+        return not ((spot_pixels & fake_pixels) == set())
+
+    # helper function to determine if the fake planet is touching the real planet
+    def _is_touching_planet(self, fake_pixels, n_set):
+        real_pixels = self._get_pixels(((self.planet_pa - self.stamp_size) % 360,(self.planet_pa + self.stamp_size) % 360),
+                                        (self.planet_sep - self.stamp_size, self.planet_sep + self.stamp_size),
+                                        n_set)
+        #self._plot_pixels(real_pixels, 'real pixels in _is_touching_planet')
+        
+        if (fake_pixels & real_pixels) != set():
+            self._display_overlap(fake_pixels, real_pixels, 'real and fake planets overlap')
+        return not ((fake_pixels & real_pixels) == set())
+
+    # helper function to determine if the fake planet is outside of the image
+    def _is_outside(self, fake_pixels, n_set):
+        for pixel in fake_pixels:
+            if pixel[0] < 0 or pixel[0] >= self.dataset.input.shape[2]:
+                return True
+            if pixel[1] < 0 or pixel[1] >= self.dataset.input.shape[1]:
+                return True
+
+        image = self.dataset.input[n_set]
+
+        for pixel in fake_pixels:
+            pixel_val = image[pixel[1]][pixel[0]]
+            if pixel_val == np.nan:
+                return True
+        
+        return False
+
+    # helper function to determine if a given parallactic angle and separation of fake planet is valid
+    def _is_valid(self, pa, sep):
+        valid = True
+        for n_set, image in enumerate(self.dataset.input):
+            fake_pixels = self._get_pixels(((pa - self.stamp_size) % 360,(pa + self.stamp_size) % 360),
+                                        (sep - self.stamp_size, sep + self.stamp_size),
+                                        n_set)
+            valid &= not self._is_outside(fake_pixels, n_set)
+            valid &= not self._is_touching_planet(fake_pixels, n_set)
+            valid &= not self._is_touching_spot(fake_pixels, n_set)
+            print(n_set/self.dataset.input.shape[0])
+            if not valid:
+                return False
+        
+        return True
+
+    # a debugger function to plot the image of pixels
+    def _plot_pixels(self, pixels, message):
+        print(message)
+
+        plt.clf()
+
+        pixel_arr = np.zeros((self.dataset.input.shape[1],self.dataset.input.shape[2]))
+
+        for pixel in pixels:
+            pixel_arr[pixel[1]][pixel[0]] = 1
+        
+        plt.imshow(pixel_arr)
+        plt.show()
+
+    # a helper function that displays the overlapping regions
+    def _display_overlap(self, pixels1, pixels2, message=''):
+        print(message)
+        
+        plt.clf()
+
+        pixel_arr1 = np.zeros((self.dataset.input.shape[1],self.dataset.input.shape[2]))
+        pixel_arr2 = np.zeros((self.dataset.input.shape[1],self.dataset.input.shape[2]))
+
+        for pixel in pixels1:
+            pixel_arr1[pixel[1]][pixel[0]] = 1
+        
+        for pixel in pixels2:
+            pixel_arr2[pixel[1]][pixel[0]] = 1
+
+        combined_pixel_arr = pixel_arr1 + pixel_arr2
+
+        plt.imshow(combined_pixel_arr)
+        plt.show()
+
+        
+
