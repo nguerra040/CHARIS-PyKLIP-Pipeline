@@ -9,7 +9,8 @@ from uncertainties import ufloat
 import matplotlib.pyplot as plt
 from scipy import stats as spstat
 from scipy import interpolate
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
+from joblib import Parallel, delayed
 
 
 import pyklip.fm as fm
@@ -338,9 +339,13 @@ class KLIP:
         fake_spectra_all_bases = []
 
         # test all the pas
+        num_cores = multiprocessing.cpu_count()
+        bool_pa = Parallel(n_jobs=num_cores)(delayed(self._is_valid)(pa, self.planet_sep) for pa in pas)
+
+        # get the valid pas        
         valid_pas = []
-        for pa in pas:
-            if self._is_valid(pa, self.planet_sep):
+        for boolean, pa in bool_pa:
+            if boolean:
                 valid_pas.append(pa)
             else:
                 print('A parallactic angle of {} is not valid!'.format(pa))
@@ -573,9 +578,10 @@ class KLIP:
             valid &= not self._is_touching_spot(fake_pixels, n_set)
             print(n_set/self.dataset.input.shape[0])
             if not valid:
-                return False
+                print('A parallactic angle of {} is not valid!'.format(pa))
+                return (False, pa)
         
-        return True
+        return (True, pa)
 
     # a debugger function to plot the image of pixels
     def _plot_pixels(self, pixels, message):
