@@ -337,23 +337,26 @@ class KLIP:
         #pas = (np.linspace(self.planet_pa, self.planet_pa+360, num=nplanets+2)%360)[1:-1] 
         fake_spectra_all_bases = []
 
+        # test all the pas
+        valid_pas = []
+        for pa in pas:
+            if self._is_valid(pa, self.planet_sep):
+                valid_pas.append(pa)
+            else:
+                print('A parallactic angle of {} is not valid!'.format(pa))
+
         # iterate through all the requested modes
         for i in range(len(self.numbasis)): 
             input_spect = self.exspect[i,:]
-            fake_spectra = np.zeros((len(pas), self.nl))
+            fake_spectra = np.zeros((len(valid_pas), self.nl))
 
             # iterate through all the requested planets
-            for p, pa in enumerate(pas): 
-                # test if the particular pa and sep for the fake planet is valid
-                if not self._is_valid(pa, self.planet_sep):
-                    print('A parallactic angle of {} is not valid!'.format(pa))
-                    continue
-
+            for p, pa in enumerate(valid_pas): 
                 basis_dir = os.path.join(self.fakes_dir, str(self.numbasis[i]))
                 if not os.path.exists(basis_dir):
                     os.makedirs(basis_dir)
                 fake_spectra[p,:] = fake_spect(pa, input_spect, self.numbasis[i])
-                percent = ((p + len(pas)*i)/(len(self.numbasis) * len(pas))) * 100
+                percent = ((p + len(valid_pas)*i)/(len(self.numbasis) * len(valid_pas))) * 100
                 print(str(percent) + "%")
             fake_spectra_all_bases.append(fake_spectra)
 
