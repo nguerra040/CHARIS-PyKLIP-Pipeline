@@ -46,11 +46,11 @@ def main():
 
     # use the spectrum in stage 2 to plot graphs of the 
     # spectra
-    #f = Figures()
-    #f.uncalib_fig()
-    #f.calib_fig()
-    #f.mag_fig()
-    #f.all_obs_fig()
+    f = Figures()
+    f.uncalib_fig()
+    f.calib_fig()
+    f.mag_fig()
+    f.all_obs_fig()
                     
 
 
