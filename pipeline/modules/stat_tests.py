@@ -332,8 +332,9 @@ class Stats_Test:
 
 
 s = Stats_Test()
-s.ad_k_samp_test()
+#s.ad_k_samp_test()
+for spacing in [1,2,3,4,5,6]:
+    s.get_variance(spacing, 20)        
 #s.get_histogram()
-        
 
 

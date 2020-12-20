@@ -11,6 +11,8 @@ from scipy import stats as spstat
 from scipy import interpolate
 import multiprocessing
 from joblib import Parallel, delayed
+#from skimage.transform import rotate
+from pyklip.klip import rotate
 
 
 import pyklip.fm as fm
@@ -128,7 +130,8 @@ class KLIP:
                                         numbasis=self.numbasis, 
                                         maxnumbasis=int(self.parameters['maxnumbasis']), 
                                         mode=self.parameters['mode'], 
-                                        highpass=boolean(self.parameters['highpass']))
+                                        highpass=boolean(self.parameters['highpass']),
+                                        numthreads=int(config['Klip-static']['threads']))
 
     # Perform KLIP-FM via pyKLIP on the dataset, used to produce
     # the spectrum. The method first extracts an intial spectra. 
@@ -158,7 +161,7 @@ class KLIP:
             
             # perform KLIP using pyKLIP
             fm.klip_dataset(self.dataset, self.fm_class,
-                            fileprefix=self.parameters['fileprefix'],
+                            fileprefix=self.parameters['fileprefix'] + "_errorbars=" + config['Errorbars']['error_bars'],
                             annuli=[[self.planet_sep - self.stamp_size,self.planet_sep + self.stamp_size]],
                             subsections=[[(self.planet_pa - self.stamp_size)/180.*np.pi,\
                                         (self.planet_pa + self.stamp_size)/180.*np.pi]],
@@ -167,7 +170,8 @@ class KLIP:
                             spectrum=spectrum,
                             save_klipped=boolean(self.parameters['saveklipped']), 
                             highpass=boolean(self.parameters['highpass']),
-                            outputdir=self.klipped_fm_spectra_dir)
+                            outputdir=self.klipped_fm_spectra_dir,
+                            numthreads=int(config['Klip-static']['threads']))
 
             # interpolate the nan values in the forward model
             print('################## NAN',np.argwhere(np.isnan(self.dataset.fmout[:,:,-1,:])))
@@ -180,17 +184,24 @@ class KLIP:
                                                                 scaling_factor=self.parameters['scalefactor'],
                                                                 method=self.parameters['reverse_method'])
             
-            # calculate the fake planet spectra
-            fake_spectra_all_bases = self._calc_error_bars()
-            self.exspect_error = []
-            self.fake_mean = []
-            for i in range(len(fake_spectra_all_bases)):
-                for j in range(self.nl):
-                    x = fake_spectra_all_bases[i][:,j]
-                    err = spstat.iqr(x)
-                    m = ufloat(np.mean(x), np.std(x))
-                    self.exspect_error.append(err)
-                    self.fake_mean.append(m)
+            # if user does not want to calculate error bars, then skip <_calc_error_bars()>
+            # and set <fake_spectra_all_bases> to be 0
+            if boolean(config['Errorbars']['error_bars']): # user wants error bars
+                # calculate the fake planet spectra
+                fake_spectra_all_bases = self._calc_error_bars()
+                self.exspect_error = []
+                self.fake_mean = []
+                for i in range(len(fake_spectra_all_bases)):
+                    for j in range(self.nl):
+                        x = fake_spectra_all_bases[i][:,j]
+                        err = spstat.iqr(x)
+                        m = ufloat(np.mean(x), np.std(x))
+                        self.exspect_error.append(err)
+                        self.fake_mean.append(m)
+            else: # user does not want error bars
+                self.exspect_error = len(np.unique(self.dataset.wvs)) * len(self.numbasis) * [0]
+                self.fake_mean = len(np.unique(self.dataset.wvs)) * len(self.numbasis) * [0]
+            
 
             # error bars
             self.exspect_error = np.array(self.exspect_error).reshape(int(len(self.exspect_error)/self.nl),self.nl)
@@ -209,7 +220,10 @@ class KLIP:
                 self.exspect_ufloat = np.add(self.exspect_ufloat,(np.subtract(self.exspect_ufloat,self.fake_mean)))
 
             # export spectra as csv
-            self._export_csv_dataset(self.exspect_ufloat, 'uncalib')
+            if boolean(config['Errorbars']['error_bars']):
+                self._export_csv_dataset(self.exspect_ufloat, 'uncalib_bars')
+            else:
+                self._export_csv_dataset(self.exspect_ufloat, 'uncalib_nobars')
 
             # perform spectral calibration 
             if boolean(config['Calibration']['spect_calibrate']):
@@ -234,7 +248,10 @@ class KLIP:
                     self.exspect_ufloat_calibrated = self.exspect_ufloat * star_spectrum * spot_to_star_ratio
 
                     # export data
-                    self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated')
+                    if boolean(config['Errorbars']['error_bars']):
+                        self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated_bars')
+                    else:
+                        self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated_nobars')
                 else:
                     # from https://scholar.princeton.edu/charis/capabilities
                     j_mag_upper = 1.328
@@ -268,7 +285,10 @@ class KLIP:
                     self.exspect_ufloat_calibrated = self.exspect_ufloat * star_spectrum * spot_to_star_ratio
 
                     #export spectra data as csv file
-                    self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated')            
+                    if boolean(config['Errorbars']['error_bars']):
+                        self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated_bars')       
+                    else:
+                        self._export_csv_dataset(self.exspect_ufloat_calibrated, 'calibrated_nobars')   
 
 
     # Helper function for self.klip_fm_spect. Function injects fake planets 
@@ -310,7 +330,8 @@ class KLIP:
                         spectrum=spectrum,
                         save_klipped=boolean(self.parameters['saveklipped']), 
                         highpass=boolean(self.parameters['highpass']),
-                        outputdir=os.path.join(self.fakes_dir, str(basis)))
+                        outputdir=os.path.join(self.fakes_dir, str(basis)),
+                        numthreads=int(config['Klip-static']['threads']))
             
             # interpolate the nan values in the forward model
             print('################## NAN',np.argwhere(np.isnan(tempdataset.fmout[:,:,-1,:])))
@@ -339,16 +360,37 @@ class KLIP:
         fake_spectra_all_bases = []
 
         # test all the pas
+        '''pas = pas[::-1]
         num_cores = multiprocessing.cpu_count()
         bool_pa = Parallel(n_jobs=num_cores)(delayed(self._is_valid)(pa, self.planet_sep) for pa in pas)
-
+        
         # get the valid pas        
         valid_pas = []
-        for boolean, pa in bool_pa:
-            if boolean:
+        for b, pa in bool_pa:
+            if b:
                 valid_pas.append(pa)
             else:
                 print('A parallactic angle of {} is not valid!'.format(pa))
+         # cutoff valid pas to the maxpas requested
+        valid_pas = valid_pas[:int(config['Errorbars']['maxplanets'])]
+        print('{} valid pas!'.format(len(valid_pas)))'''
+
+        # nonparallel
+        np.random.shuffle(pas)
+        # get the valid pas   
+        valid_pas = []
+        for pa in pas:
+            print('starting pa {} validation'.format(pa))
+            b, angle = self._is_valid(pa, self.planet_sep)
+            if b:
+                valid_pas.append(angle)
+            else:
+                print('A parallactic angle of {} is not valid!'.format(angle))
+            if len(valid_pas) >= int(config['Errorbars']['maxplanets']):
+                break
+        print('{} valid pas!'.format(len(valid_pas)))
+
+       
 
         # iterate through all the requested modes
         for i in range(len(self.numbasis)): 
@@ -453,9 +495,8 @@ class KLIP:
                     klipped[(loc[0],loc[1],i)] = f(i)
         return klipped
 
-    
-    # helper function to determine if a pixel is within the pa and sep ranges
-    def _within_range_q(self, coord, pa_range, sep_range, n_set):
+    # helper function to get the pa and sep given pixels
+    def _get_pa_sep(self, coord, n_set):
         sep = np.sqrt((coord[0] - self.dataset.centers[n_set][0])**2 + (coord[1] - self.dataset.centers[n_set][1])**2)
 
         numer = coord[1] - self.dataset.centers[n_set][1]
@@ -470,6 +511,12 @@ class KLIP:
             pa = np.arctan(numer / denom) * 180 / np.pi + 180
 
         pa = (pa - 90) % 360
+
+        return (sep, pa)
+
+    # helper function to determine if a pixel is within the pa and sep ranges
+    def _within_range_q(self, coord, pa_range, sep_range, n_set):
+        sep, pa = self._get_pa_sep(coord, n_set)
         
         sep_q = False
         if sep >= sep_range[0] and sep <= sep_range[1]:
@@ -503,18 +550,20 @@ class KLIP:
         return pixels
 
     # helper function to get the spot pixels
-    def _get_spot_pixels(self, n_set):
+    def _get_spot_pixels(self, n_set, tolerance):
         pixel_arr = []
 
         slice_spots = self.dataset.spot_locs[n_set]
         for spot in slice_spots:
-            spot_x = np.round(spot[0])
-            spot_y = np.round(spot[1])
+            rotated_spot = self._rotate_point(self.dataset.centers[n_set],
+                                                spot, self.dataset.PAs[n_set])
+            spot_x = np.round(rotated_spot[0])
+            spot_y = np.round(rotated_spot[1])
 
-            spot_x_low = int(spot_x - self.stamp_size)
-            spot_x_high = int(spot_x + self.stamp_size)
-            spot_y_low = int(spot_y - self.stamp_size)
-            spot_y_high = int(spot_y + self.stamp_size)
+            spot_x_low = int(spot_x - tolerance)
+            spot_x_high = int(spot_x + tolerance)
+            spot_y_low = int(spot_y - tolerance)
+            spot_y_high = int(spot_y + tolerance)
 
             x_arr = range(spot_x_low, spot_x_high + 1)
             y_arr = range(spot_y_low, spot_y_high + 1)
@@ -527,30 +576,30 @@ class KLIP:
         return pixels
 
     # helper function to determine if the fake planet is touching a satellite spot
-    def _is_touching_spot(self, fake_pixels, n_set):
-        spot_pixels = self._get_spot_pixels(n_set)
+    def _is_touching_spot(self, fake_pixels, n_set, tolerance):
+        spot_pixels = self._get_spot_pixels(n_set, tolerance)
         #print(spot_pixels)
         #self._plot_pixels(spot_pixels,'spot pixels in _is_touching_spot')
         #self._plot_pixels(fake_pixels, 'fake pixels in _is_touching_spot')
         #print(fake_pixels)
 
-        if (spot_pixels & fake_pixels) != set():
-            self._display_overlap(spot_pixels, fake_pixels, 'spot and fake planet overlap')
+        '''if (spot_pixels & fake_pixels) != set():
+            self._display_overlap(spot_pixels, fake_pixels, 'spot and fake planet overlap')'''
         return not ((spot_pixels & fake_pixels) == set())
 
     # helper function to determine if the fake planet is touching the real planet
-    def _is_touching_planet(self, fake_pixels, n_set):
-        real_pixels = self._get_pixels(((self.planet_pa - self.stamp_size) % 360,(self.planet_pa + self.stamp_size) % 360),
-                                        (self.planet_sep - self.stamp_size, self.planet_sep + self.stamp_size),
+    def _is_touching_planet(self, fake_pixels, n_set, tolerance):
+        real_pixels = self._get_pixels(((self.planet_pa - tolerance) % 360,(self.planet_pa + tolerance) % 360),
+                                        (self.planet_sep - tolerance, self.planet_sep + tolerance),
                                         n_set)
         #self._plot_pixels(real_pixels, 'real pixels in _is_touching_planet')
         
-        if (fake_pixels & real_pixels) != set():
-            self._display_overlap(fake_pixels, real_pixels, 'real and fake planets overlap')
+        '''if (fake_pixels & real_pixels) != set():
+            self._display_overlap(fake_pixels, real_pixels, 'real and fake planets overlap')'''
         return not ((fake_pixels & real_pixels) == set())
 
     # helper function to determine if the fake planet is outside of the image
-    def _is_outside(self, fake_pixels, n_set):
+    def _is_outside(self, fake_pixels, n_set, tolerance):
         for pixel in fake_pixels:
             if pixel[0] < 0 or pixel[0] >= self.dataset.input.shape[2]:
                 return True
@@ -559,23 +608,48 @@ class KLIP:
 
         image = self.dataset.input[n_set]
 
+        # rotate image
+        image = rotate(image, self.dataset.PAs[n_set], self.dataset.centers[n_set], 
+                        new_center=[int(self.dataset.input.shape[2]//2), int(self.dataset.input.shape[1]//2)])
+
+
+
+        new_image = copy.deepcopy(image)
+        new_fake_px = copy.deepcopy(fake_pixels)
+        real_pixels = self._get_pixels(((self.planet_pa - 4) % 360,(self.planet_pa + 4) % 360),
+                                        (self.planet_sep - 4, self.planet_sep + 4),
+                                        n_set)
+        spot_pixels = self._get_spot_pixels(n_set, 4)
+        self._display_overlay_pixels(new_fake_px | spot_pixels | real_pixels,new_image, '')
+
+        count = 0
         for pixel in fake_pixels:
             pixel_val = image[pixel[1]][pixel[0]]
-            if pixel_val == np.nan:
+            if np.isnan(pixel_val):
+                new_image = copy.deepcopy(image)
+                new_fake_px = copy.deepcopy(fake_pixels)
+                '''self._display_overlay_pixels(new_fake_px, new_image, 'result of outside pixels checking')'''
+                count += 1
+            if count > tolerance:
                 return True
         
         return False
 
+    global_pa = 0
     # helper function to determine if a given parallactic angle and separation of fake planet is valid
     def _is_valid(self, pa, sep):
         valid = True
+        tol = 4
+        global global_pa
+        global_pa = pa
+        print('##################PA: {}#####################'.format(pa))
         for n_set, image in enumerate(self.dataset.input):
             fake_pixels = self._get_pixels(((pa - self.stamp_size) % 360,(pa + self.stamp_size) % 360),
                                         (sep - self.stamp_size, sep + self.stamp_size),
                                         n_set)
-            valid &= not self._is_outside(fake_pixels, n_set)
-            valid &= not self._is_touching_planet(fake_pixels, n_set)
-            valid &= not self._is_touching_spot(fake_pixels, n_set)
+            valid &= not self._is_outside(fake_pixels, n_set, 0)
+            valid &= not self._is_touching_planet(fake_pixels, n_set, tol)
+            valid &= not self._is_touching_spot(fake_pixels, n_set, tol)
             print(n_set/self.dataset.input.shape[0])
             if not valid:
                 print('A parallactic angle of {} is not valid!'.format(pa))
@@ -594,7 +668,7 @@ class KLIP:
         for pixel in pixels:
             pixel_arr[pixel[1]][pixel[0]] = 1
         
-        plt.imshow(pixel_arr)
+        plt.imshow(pixel_arr, origin='lower')
         plt.show()
 
     # a helper function that displays the overlapping regions
@@ -614,8 +688,38 @@ class KLIP:
 
         combined_pixel_arr = pixel_arr1 + pixel_arr2
 
-        plt.imshow(combined_pixel_arr)
+        plt.imshow(combined_pixel_arr, origin='lower')
+        plt.show()
+        
+
+    def _display_overlay_pixels(self, pixels, image, message):
+        print(message)
+
+        plt.clf()
+
+        for pixel in pixels:
+            image[pixel[1]][pixel[0]] = 5555
+        
+        plt.imshow(image, origin='lower')
+        plt.title('angle of {}'.format(global_pa))
         plt.show()
 
-        
+    # a helper function to rotate a point about another point by a certain angle
+    def _rotate_point(self, center, p, angle):
+        c = np.cos(angle * np.pi / 180)
+        s = np.sin(angle * np.pi / 180)
+
+        # translate point by center
+        trans_px = p[0] - center[0]
+        trans_py = p[1] - center[1]
+
+        # perform actual rotation
+        rot_px = trans_px * c - trans_py * s
+        rot_py = trans_py * c + trans_px * s
+
+        # translate back
+        final_px = rot_px + center[0] - (center[0] - self.dataset.input.shape[2] / 2)
+        final_py = rot_py + center[1] - (center[1] - self.dataset.input.shape[1] / 2)
+
+        return (final_px, final_py)
 

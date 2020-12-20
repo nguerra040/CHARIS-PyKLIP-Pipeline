@@ -14,6 +14,7 @@ interval = 5
 
 
 files = glob.glob(os.path.join(old_cubes_location, '*.fits'))
+outarr = []
 for i, f in enumerate(files):
     first = interval * math.floor(i/interval) + 1
     last = interval * math.floor(i/interval) + interval
@@ -22,6 +23,14 @@ for i, f in enumerate(files):
     file_path = os.path.join(new_cubes_dir, dir_name, 'extracted/cubes')
     if not os.path.exists(file_path):
         os.makedirs(file_path)
-    print(os.path.basename(dir_name))
+    
+    outarr.append(os.path.basename(dir_name))
+
+outarr = list(dict.fromkeys(outarr))
+outstring = ''
+for out in outarr:
+    outstring += ','+out
+    
+print(outstring)
     #copy2(f, file_path)
 

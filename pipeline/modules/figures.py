@@ -522,9 +522,9 @@ class Figures:
                 fig1.savefig(os.path.join(figure_dir, 
                             '{}_large_{}.png'.format(config[key_string]['basename'],dynamic_title_extension)))
 
-#f = Figures()
+f = Figures()
 #f.uncalib_fig(overwrite=True)
 #f.calib_fig(overwrite=True)
 #f.mag_fig(overwrite=True)
-#f.all_obs_fig(overwrite=True)
+f.all_obs_fig(overwrite=True)
                 

@@ -91,13 +91,13 @@ class Data:
         files = glob.glob(os.path.join(directory, '*.csv'))
         for f in files:
             f_basename = os.path.basename(f)
-            if 'calibrated' in f_basename and 'error' not in f_basename:
+            if 'calibrated' in f_basename and 'error' not in f_basename and 'nobars' in f_basename:
                 calib_spect = pd.read_csv(f)
-            elif 'calibrated' in f_basename and 'error' in f_basename:
+            elif 'calibrated' in f_basename and 'error' in f_basename and 'nobars' in f_basename:
                 calib_error = pd.read_csv(f)
-            elif 'uncalib' in f_basename and 'error' not in f_basename:
+            elif 'uncalib' in f_basename and 'error' not in f_basename and 'nobars' in f_basename:
                 uncalib_spect = pd.read_csv(f)
-            elif 'uncalib' in f_basename and 'error' in f_basename:
+            elif 'uncalib' in f_basename and 'error' in f_basename and 'nobars' in f_basename:
                 uncalib_error = pd.read_csv(f)
 
         # get list of wavelengths

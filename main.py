@@ -37,7 +37,7 @@ def main():
                 params = dict(zip(dynamic_val_keys, comb))
                 k = KLIP(case_path, params)
                 k.klip_general()
-                k.klip_fm_spect()
+                k.klip_fm_spect(overwrite=True)
                 del k
 
 
@@ -46,11 +46,11 @@ def main():
 
     # use the spectrum in stage 2 to plot graphs of the 
     # spectra
-    f = Figures()
-    f.uncalib_fig()
-    f.calib_fig()
-    f.mag_fig()
-    f.all_obs_fig()
+    #f = Figures()
+    #f.uncalib_fig()
+    #f.calib_fig()
+    #f.mag_fig()
+    #f.all_obs_fig()
                     
 
 
