@@ -158,13 +158,17 @@ class KLIP:
                 spectrum = None
             else:
                 spectrum = self.parameters['spectrum']
+
+            
+            annuli=[[self.planet_sep-self.stamp_size, self.planet_sep+self.stamp_size]]
+            phi_section_size = 2 * self.stamp_size / self.planet_sep # radians
+            subsections=[[np.radians(self.planet_pa) - phi_section_size / 2.,np.radians(self.planet_pa) + phi_section_size / 2.]]
             
             # perform KLIP using pyKLIP
             fm.klip_dataset(self.dataset, self.fm_class,
                             fileprefix=self.parameters['fileprefix'] + "_errorbars=" + config['Errorbars']['error_bars'],
-                            annuli=[[self.planet_sep - self.stamp_size,self.planet_sep + self.stamp_size]],
-                            subsections=[[(self.planet_pa - self.stamp_size)/180.*np.pi,\
-                                        (self.planet_pa + self.stamp_size)/180.*np.pi]],
+                            annuli=annuli,
+                            subsections=subsections,
                             movement=int(self.parameters['movement']), 
                             numbasis=self.numbasis,
                             spectrum=spectrum,
@@ -319,12 +323,15 @@ class KLIP:
                                         input_psfs=self.PSF_cube,
                                         input_psfs_wvs=np.unique(self.dataset.wvs),
                                         stamp_size=self.stamp_size)
+
+            annuli=[[self.planet_sep-self.stamp_size, self.planet_sep+self.stamp_size]]
+            phi_section_size = 2 * self.stamp_size / self.planet_sep # radians
+            subsections=[[np.radians(self.planet_pa) - phi_section_size / 2.,np.radians(self.planet_pa) + phi_section_size / 2.]]
             
             fm.klip_dataset(tempdataset, fm_class,
                         fileprefix="fmspect_"+"pa="+str(pa),
-                        annuli=[[self.planet_sep - self.stamp_size, self.planet_sep + self.stamp_size]],
-                        subsections=[[(pa - self.stamp_size)/180.*np.pi,\
-                                    (pa + self.stamp_size)/180.*np.pi]],
+                        annuli=annuli,
+                        subsections=subsections,
                         movement=int(self.parameters['movement']),
                         numbasis=basis,
                         spectrum=spectrum,
@@ -668,8 +675,9 @@ class KLIP:
         for pixel in pixels:
             pixel_arr[pixel[1]][pixel[0]] = 1
         
-        plt.imshow(pixel_arr, origin='lower')
-        plt.show()
+        #plt.imshow(pixel_arr, origin='lower')
+        #plt.show(block=False)
+        #plt.pause(0.001)
 
     # a helper function that displays the overlapping regions
     def _display_overlap(self, pixels1, pixels2, message=''):
@@ -688,8 +696,9 @@ class KLIP:
 
         combined_pixel_arr = pixel_arr1 + pixel_arr2
 
-        plt.imshow(combined_pixel_arr, origin='lower')
-        plt.show()
+        #plt.imshow(combined_pixel_arr, origin='lower')
+        #plt.show(block=False)
+        #plt.pause(0.001)
         
 
     def _display_overlay_pixels(self, pixels, image, message):
@@ -700,9 +709,10 @@ class KLIP:
         for pixel in pixels:
             image[pixel[1]][pixel[0]] = 5555
         
-        plt.imshow(image, origin='lower')
-        plt.title('angle of {}'.format(global_pa))
-        plt.show()
+        #plt.imshow(image, origin='lower')
+        #plt.title('angle of {}'.format(global_pa))
+        #plt.show(block=False)
+        #plt.pause(0.001)
 
     # a helper function to rotate a point about another point by a certain angle
     def _rotate_point(self, center, p, angle):
